@@ -3,6 +3,7 @@
 use doene_core::labels::due_label;
 use doene_core::{DEFAULT_SORT, Date, HydratedTask, Importance, SmartList, SmartSettings, TaskStatus};
 use doene_core::{smart_tasks, smartlists::sort_tasks};
+use doene_service::{Service, ServiceError, TaskPatch};
 
 /// The user's theme choice (persisted as the `theme` setting).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,6 +88,36 @@ pub fn list_rows(
         .collect()
 }
 
+/// What a completion toggle did, for the caller's feedback (toast in #12).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Toggled {
+    /// Completed; a repeating task spawned its next occurrence due at the label.
+    Completed { next_due: Option<String> },
+    /// Reopened (any spawned occurrence was removed by the service).
+    Reopened,
+}
+
+/// Flip a task between open and completed through the service (which logs the
+/// activity, spawns/removes the next occurrence and cascades to descendants).
+pub fn toggle_complete(
+    service: &Service,
+    id: &str,
+    completed: bool,
+    locale: &str,
+) -> Result<Toggled, ServiceError> {
+    let status = if completed { TaskStatus::Open } else { TaskStatus::Completed };
+    let out = service.update_task(id, TaskPatch { status: Some(status), ..Default::default() })?;
+    if completed {
+        return Ok(Toggled::Reopened);
+    }
+    let today = service.today().to_string();
+    let next_due = out
+        .next
+        .and_then(|n| n.task.due_date)
+        .map(|d| due_label(&d.to_string(), &today, Some(locale)));
+    Ok(Toggled::Completed { next_due })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,5 +183,58 @@ mod tests {
             assert_eq!(Theme::parse(t.id()), t);
         }
         assert_eq!(Theme::parse("pink"), Theme::System);
+    }
+
+    fn svc() -> (Service, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = doene_storage::Storage::open(&dir.path().join("d.db")).unwrap();
+        let clock = Box::new(|| "2025-03-10T09:00:00.000Z".to_owned());
+        (Service::with_clock(storage, clock), dir)
+    }
+
+    #[test]
+    fn toggling_recurring_task_spawns_then_reopen_restores() {
+        let (s, _d) = svc();
+        let t = s
+            .quick_add("water plants", None, false)
+            .unwrap();
+        s.update_task(
+            &t.task.id,
+            TaskPatch {
+                due_date: Some(Some(Date::parse("2025-03-10").unwrap())),
+                recurrence: Some(Some(doene_core::recurrence::RawRecurrence {
+                    kind: Some("daily".into()),
+                    interval: None,
+                    unit: None,
+                    days: None
+                })),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let r = toggle_complete(&s, &t.task.id, false, "en").unwrap();
+        assert_eq!(r, Toggled::Completed { next_due: Some("Tomorrow".into()) });
+        let all = s.all_tasks().unwrap();
+        assert_eq!(all.len(), 2);
+        let spawn = all.iter().find(|h| h.task.id != t.task.id).unwrap();
+        assert_eq!(spawn.task.spawned_from.as_deref(), Some(t.task.id.as_str()));
+        let acts: Vec<_> = s.activity(&t.task.id).unwrap().into_iter().map(|a| a.action).collect();
+        assert!(acts.contains(&"completed".to_owned()));
+
+        assert_eq!(toggle_complete(&s, &t.task.id, true, "en").unwrap(), Toggled::Reopened);
+        let all = s.all_tasks().unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].task.status, TaskStatus::Open);
+        assert_eq!(all[0].task.completed_at, None);
+    }
+
+    #[test]
+    fn toggling_plain_task_has_no_next() {
+        let (s, _d) = svc();
+        let t = s.quick_add("plain", None, false).unwrap();
+        assert_eq!(
+            toggle_complete(&s, &t.task.id, false, "en").unwrap(),
+            Toggled::Completed { next_due: None }
+        );
     }
 }
