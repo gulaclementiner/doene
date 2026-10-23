@@ -12,6 +12,7 @@ use crate::drawer::{
     ActivityLine, FieldEdit, RecurrenceDraft, StepEdit, TagEdit, StepRow, SubtaskNode, activity_lines, add_subtask,
     apply_edit, apply_step, apply_tag, tag_names, tag_suggestions, load_order, move_section, step_rows, subtask_tree,
 };
+use crate::palette::{self, Action, Command};
 use crate::views::{SortDraft, ViewDraft, describe, drop_index, rail_rows, sort_key_label, view_rows};
 use crate::model::{
     TaskRow, Theme, Toasts, Toggled, TrashRow, delete_with_toast, list_rows, toggle_complete, trash_rows,
@@ -42,6 +43,9 @@ pub struct DöneApp {
     view: Option<String>,
     form: Option<ViewDraft>,
     form_error: Option<String>,
+    /// Open palette: (query, highlighted index).
+    palette: Option<(String, usize)>,
+    focus_composer: bool,
 }
 
 /// Open drawer state: edit buffers for one task.
@@ -97,6 +101,8 @@ impl DöneApp {
             view: None,
             form: None,
             form_error: None,
+            palette: None,
+            focus_composer: false,
         };
         app.reload();
         app
@@ -298,6 +304,120 @@ impl DöneApp {
         }
         if undo {
             self.undo();
+        }
+    }
+
+    fn run_action(&mut self, a: Action, ctx: &egui::Context) {
+        match a {
+            Action::OpenList(l) => {
+                self.list = l;
+                self.view = None;
+                self.show_trash = false;
+                self.form = None;
+                self.reload();
+            }
+            Action::OpenView(id) => {
+                self.view = Some(id);
+                self.show_trash = false;
+                self.form = None;
+                self.reload();
+            }
+            Action::OpenTask(id) => {
+                self.show_trash = false;
+                self.form = None;
+                self.open_drawer(&id);
+            }
+            Action::Run(Command::NewTask) => {
+                self.show_trash = false;
+                self.form = None;
+                self.focus_composer = true;
+            }
+            Action::Run(Command::NewView) => self.open_form(None),
+            Action::Run(Command::ToggleTheme) => {
+                let dark = self.is_dark(ctx);
+                self.set_theme(if dark { Theme::Light } else { Theme::Dark });
+            }
+        }
+    }
+
+    fn is_dark(&self, ctx: &egui::Context) -> bool {
+        match self.theme {
+            Theme::Dark => true,
+            Theme::Light => false,
+            Theme::System => ctx.global_style().visuals.dark_mode,
+        }
+    }
+
+    fn palette_ui(&mut self, ctx: &egui::Context) {
+        let Some((mut query, mut sel)) = self.palette.take() else { return };
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            return;
+        }
+        let hits = self.service.search(&query, palette::TASK_LIMIT).unwrap_or_default();
+        let entries = palette::build_entries(&query, &self.views, &hits, self.is_dark(ctx), &self.locale);
+        let n = entries.len();
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)) {
+            sel = palette::move_sel(sel, n, 1);
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)) {
+            sel = palette::move_sel(sel, n, -1);
+        }
+        sel = sel.min(n.saturating_sub(1));
+        let mut chosen = ctx
+            .input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter))
+            .then(|| entries.get(sel).map(|e| e.action.clone()))
+            .flatten();
+        let mut open = true;
+        egui::Window::new(self.t("palette.dialogLabel"))
+            .title_bar(false)
+            .anchor(egui::Align2::CENTER_TOP, [0.0, 60.0])
+            .fixed_size([480.0, 0.0])
+            .show(ctx, |ui| {
+                let r = ui.add(
+                    egui::TextEdit::singleline(&mut query)
+                        .hint_text(self.t("palette.placeholder"))
+                        .desired_width(f32::INFINITY),
+                );
+                r.request_focus();
+                if r.changed() {
+                    sel = 0;
+                }
+                if n == 0 {
+                    ui.weak(self.t("palette.noResults"));
+                }
+                let mut last = None;
+                egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
+                    for (i, e) in entries.iter().enumerate() {
+                        if e.section != last {
+                            if let Some(h) = e.section {
+                                ui.add_space(4.0);
+                                ui.weak(self.t(h));
+                            }
+                            last = e.section;
+                        }
+                        let resp = ui.selectable_label(i == sel, &e.label);
+                        if i == sel {
+                            resp.scroll_to_me(None);
+                        }
+                        if resp.clicked() {
+                            chosen = Some(e.action.clone());
+                        }
+                    }
+                });
+                ui.separator();
+                ui.weak(format!(
+                    "↑↓ {}   ⏎ {}   Esc {}",
+                    self.t("palette.navigate"),
+                    self.t("palette.open"),
+                    self.t("palette.close")
+                ));
+            });
+        if let Some(a) = chosen {
+            open = false;
+            self.run_action(a, ctx);
+        }
+        if open {
+            self.palette = Some((query, sel));
         }
     }
 
@@ -789,6 +909,10 @@ impl eframe::App for DöneApp {
             self.undo();
         }
 
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::K)) {
+            self.palette = if self.palette.is_some() { None } else { Some((String::new(), 0)) };
+        }
+
         egui::Panel::left("rail").exact_size(190.0).show(ui, |ui| {
             ui.add_space(8.0);
             ui.heading("Döne");
@@ -869,6 +993,9 @@ impl eframe::App for DöneApp {
                     .hint_text(hint)
                     .desired_width(f32::INFINITY),
             );
+            if std::mem::take(&mut self.focus_composer) {
+                resp.request_focus();
+            }
             if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                 self.submit();
                 resp.request_focus();
@@ -924,6 +1051,7 @@ impl eframe::App for DöneApp {
                 }
             });
         });
+        self.palette_ui(&ctx);
         self.show_toasts(&ctx);
     }
 }
