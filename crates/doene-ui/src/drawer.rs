@@ -213,6 +213,74 @@ pub fn step_rows(service: &Service, task_id: &str) -> Vec<StepRow> {
         .unwrap_or_default()
 }
 
+/// A node of the subtask tree under a task.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubtaskNode {
+    pub id: String,
+    pub subject: String,
+    pub done: bool,
+    pub depth: usize,
+}
+
+/// The task's descendants, depth-first in position order (renderable tree).
+pub fn subtask_tree(service: &Service, task_id: &str) -> Vec<SubtaskNode> {
+    let all = service.all_tasks().unwrap_or_default();
+    let mut kids: HashMap<&str, Vec<&doene_core::Task>> = HashMap::new();
+    for h in &all {
+        if let Some(p) = h.task.parent_id.as_deref() {
+            kids.entry(p).or_default().push(&h.task);
+        }
+    }
+    for v in kids.values_mut() {
+        v.sort_by(|a, b| a.position.total_cmp(&b.position));
+    }
+    let mut out = vec![];
+    let mut seen = std::collections::HashSet::from([task_id.to_owned()]);
+    let mut stack: Vec<(&str, usize)> = vec![(task_id, 0)];
+    // Iterative DFS; the seen-set guards against any corrupt cycle.
+    while let Some((id, depth)) = stack.pop() {
+        if depth > 0 {
+            let t = all.iter().find(|h| h.task.id == id).map(|h| &h.task);
+            if let Some(t) = t {
+                out.push(SubtaskNode {
+                    id: t.id.clone(),
+                    subject: t.subject.clone(),
+                    done: t.status == TaskStatus::Completed,
+                    depth: depth - 1,
+                });
+            }
+        }
+        for k in kids.get(id).into_iter().flatten().rev() {
+            if seen.insert(k.id.clone()) {
+                stack.push((&k.id, depth + 1));
+            }
+        }
+    }
+    out
+}
+
+/// Create a full task under `task_id` (quick subtask add).
+pub fn add_subtask(service: &Service, task_id: &str, subject: &str, locale: &str) -> Result<(), String> {
+    service
+        .create_task(doene_service::NewTask {
+            subject: subject.to_owned(),
+            parent_id: Some(task_id.to_owned()),
+            ..Default::default()
+        })
+        .map(|_| ())
+        .map_err(|e| error_message(&e, locale))
+}
+
+/// Nest `child` as the last subtask of `parent` (`None` = top level); a cycle
+/// or self-nesting is rejected with a localised message and nothing changes.
+pub fn nest_task(service: &Service, child: &str, parent: Option<&str>, locale: &str) -> Result<(), String> {
+    let at = service
+        .all_tasks()
+        .map(|a| a.iter().filter(|h| h.task.parent_id.as_deref() == parent && h.task.id != child).count())
+        .unwrap_or(0);
+    service.place_task(child, parent, at).map(|_| ()).map_err(|e| error_message(&e, locale))
+}
+
 /// One activity line: local-ish timestamp, action, detail.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActivityLine {
@@ -376,5 +444,39 @@ mod tests {
         assert_eq!(kids[0].task.subject, "c");
         s.undo().unwrap();
         assert_eq!(step_rows(&s, &id).len(), 2);
+    }
+
+    #[test]
+    fn subtask_tree_nests_and_rejects_cycles_with_feedback() {
+        let (s, _d) = svc();
+        let a = task(&s);
+        add_subtask(&s, &a, "b", "en").unwrap();
+        let b = subtask_tree(&s, &a)[0].id.clone();
+        add_subtask(&s, &b, "c", "en").unwrap();
+        add_subtask(&s, &a, "d", "en").unwrap();
+        let tree: Vec<_> = subtask_tree(&s, &a).into_iter().map(|n| (n.subject, n.depth)).collect();
+        assert_eq!(tree, [("b".to_owned(), 0), ("c".to_owned(), 1), ("d".to_owned(), 0)]);
+        // cycle: a under its own grandchild; and self
+        let c = subtask_tree(&s, &a)[1].id.clone();
+        assert_eq!(nest_task(&s, &a, Some(&c), "en").unwrap_err(), "subtasks cannot form a cycle");
+        assert_eq!(nest_task(&s, &b, Some(&b), "sv").unwrap_err(), "en uppgift kan inte vara sin egen deluppgift");
+        assert_eq!(subtask_tree(&s, &a).len(), 3);
+        // un-nest c to top level
+        nest_task(&s, &c, None, "en").unwrap();
+        assert_eq!(subtask_tree(&s, &a).len(), 2);
+    }
+
+    #[test]
+    fn deleting_parent_snapshots_subtree_into_trash_and_restores() {
+        let (s, _d) = svc();
+        let a = task(&s);
+        add_subtask(&s, &a, "b", "en").unwrap();
+        let b = subtask_tree(&s, &a)[0].id.clone();
+        add_subtask(&s, &b, "c", "en").unwrap();
+        let entry = s.delete_task(&a).unwrap();
+        assert!(s.all_tasks().unwrap().is_empty());
+        assert_eq!(s.trash().unwrap().len(), 1);
+        s.restore(&entry).unwrap();
+        assert_eq!(subtask_tree(&s, &a).len(), 2);
     }
 }

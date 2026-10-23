@@ -9,7 +9,8 @@ use eframe::egui::{self, Color32, RichText};
 use serde_json::json;
 
 use crate::drawer::{
-    ActivityLine, FieldEdit, RecurrenceDraft, activity_lines, apply_edit, load_order, move_section,
+    ActivityLine, FieldEdit, RecurrenceDraft, StepEdit, StepRow, SubtaskNode, activity_lines, add_subtask,
+    apply_edit, apply_step, load_order, move_section, step_rows, subtask_tree,
 };
 use crate::model::{
     TaskRow, Theme, Toasts, Toggled, TrashRow, delete_with_toast, list_rows, toggle_complete, trash_rows,
@@ -49,6 +50,10 @@ struct Drawer {
     order: Vec<String>,
     activity: Vec<ActivityLine>,
     customizing: bool,
+    steps: Vec<StepRow>,
+    subtasks: Vec<SubtaskNode>,
+    new_step: String,
+    new_subtask: String,
 }
 
 fn nav_key(l: SmartList) -> &'static str {
@@ -127,12 +132,26 @@ impl DöneApp {
             order: load_order(&self.service, id),
             activity: activity_lines(&self.service, id),
             customizing: self.drawer.as_ref().is_some_and(|d| d.id == id && d.customizing),
+            steps: step_rows(&self.service, id),
+            subtasks: subtask_tree(&self.service, id),
+            new_step: self.drawer.as_ref().filter(|d| d.id == id).map(|d| d.new_step.clone()).unwrap_or_default(),
+            new_subtask: self.drawer.as_ref().filter(|d| d.id == id).map(|d| d.new_subtask.clone()).unwrap_or_default(),
         });
     }
 
     fn edit_field(&mut self, edit: FieldEdit) {
         let Some(id) = self.drawer.as_ref().map(|d| d.id.clone()) else { return };
         match apply_edit(&self.service, &id, edit, &self.locale) {
+            Ok(()) => self.error = None,
+            Err(m) => self.error = Some(m),
+        }
+        self.reload();
+    }
+
+    /// Run a drawer action (steps/subtasks) and refresh; errors surface as feedback.
+    fn drawer_action(&mut self, f: impl FnOnce(&Service, &str, &str) -> Result<(), String>) {
+        let Some(id) = self.drawer.as_ref().map(|d| d.id.clone()) else { return };
+        match f(&self.service, &id, &self.locale) {
             Ok(()) => self.error = None,
             Err(m) => self.error = Some(m),
         }
@@ -326,6 +345,10 @@ impl DöneApp {
         let activity_title = self.t("drawer.activity");
         let Some(d) = self.drawer.as_mut() else { return };
         let mut edit = None;
+        let mut step_edit: Option<StepEdit> = None;
+        let mut sub_add: Option<String> = None;
+        let mut sub_toggle: Option<(String, bool)> = None;
+        let mut open_sub: Option<String> = None;
         let mut close = false;
         let mut move_sec = None;
         let weekday_keys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
@@ -432,7 +455,56 @@ impl DöneApp {
                             edit = Some(FieldEdit::Notes(d.notes.clone()));
                         }
                     }
-                    // Tags, subtasks, steps, references and completion arrive in later tickets.
+                    "steps" => {
+                        ui.label(RichText::new(t("section.steps")).strong());
+                        for st in &d.steps {
+                            ui.horizontal(|ui| {
+                                let p = HashMap::from([("name".to_owned(), Some(st.subject.clone()))]);
+                                let mut done = st.done;
+                                if ui.checkbox(&mut done, "").on_hover_text(tr("drawer.completeStep", &p, Some(&locale))).changed() {
+                                    step_edit = Some(StepEdit::Toggle(st.id.clone()));
+                                }
+                                ui.label(if st.done { RichText::new(&st.subject).strikethrough().weak() } else { RichText::new(&st.subject) });
+                                if ui.small_button("✕").on_hover_text(tr("drawer.deleteStep", &p, Some(&locale))).clicked() {
+                                    step_edit = Some(StepEdit::Delete(st.id.clone()));
+                                }
+                                if ui.small_button("⤴").on_hover_text(t("task.dropToStep")).clicked() {
+                                    step_edit = Some(StepEdit::Promote(st.id.clone()));
+                                }
+                            });
+                        }
+                        let r = ui.add(egui::TextEdit::singleline(&mut d.new_step).hint_text(t("drawer.addStepPlaceholder")).desired_width(f32::INFINITY));
+                        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && !d.new_step.trim().is_empty() {
+                            step_edit = Some(StepEdit::Add(std::mem::take(&mut d.new_step)));
+                            r.request_focus();
+                        }
+                    }
+                    "subtasks" => {
+                        ui.label(RichText::new(t("section.subtasks")).strong());
+                        if d.subtasks.is_empty() {
+                            ui.label(RichText::new(t("drawer.subtasksHint")).small().weak());
+                        }
+                        for n in &d.subtasks {
+                            ui.horizontal(|ui| {
+                                ui.add_space(14.0 * n.depth as f32);
+                                let p = HashMap::from([("name".to_owned(), Some(n.subject.clone()))]);
+                                let mut done = n.done;
+                                let tip = tr(if n.done { "drawer.reopenSubtask" } else { "drawer.completeSubtask" }, &p, Some(&locale));
+                                if ui.checkbox(&mut done, "").on_hover_text(tip).changed() {
+                                    sub_toggle = Some((n.id.clone(), n.done));
+                                }
+                                if ui.link(&n.subject).clicked() {
+                                    open_sub = Some(n.id.clone());
+                                }
+                            });
+                        }
+                        let r = ui.add(egui::TextEdit::singleline(&mut d.new_subtask).hint_text(t("drawer.addSubtaskPlaceholder")).desired_width(f32::INFINITY));
+                        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && !d.new_subtask.trim().is_empty() {
+                            sub_add = Some(std::mem::take(&mut d.new_subtask));
+                            r.request_focus();
+                        }
+                    }
+                    // Tags, references and completion arrive in later tickets.
                     _ => {}
                 }
                 ui.add_space(6.0);
@@ -455,6 +527,18 @@ impl DöneApp {
         }
         if let Some(e) = edit {
             self.edit_field(e);
+        }
+        if let Some(e) = step_edit {
+            self.drawer_action(|s, id, l| apply_step(s, id, e, l));
+        }
+        if let Some(sub) = sub_add {
+            self.drawer_action(|s, id, l| add_subtask(s, id, &sub, l));
+        }
+        if let Some((sid, was_done)) = sub_toggle {
+            self.toggle(&sid, was_done);
+        }
+        if let Some(sid) = open_sub {
+            self.open_drawer(&sid);
         }
     }
 }
