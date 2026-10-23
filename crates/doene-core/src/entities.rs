@@ -137,6 +137,33 @@ pub enum RecurrenceType {
     Custom,
 }
 
+impl RecurrenceType {
+    /// The Gör't token for this kind (`"daily"`, …).
+    pub fn as_token(self) -> &'static str {
+        match self {
+            Self::Daily => "daily",
+            Self::Weekdays => "weekdays",
+            Self::Weekly => "weekly",
+            Self::Monthly => "monthly",
+            Self::Yearly => "yearly",
+            Self::Custom => "custom",
+        }
+    }
+
+    /// Parse a Gör't token; `None` for unknown kinds.
+    pub fn from_token(token: &str) -> Option<Self> {
+        match token {
+            "daily" => Some(Self::Daily),
+            "weekdays" => Some(Self::Weekdays),
+            "weekly" => Some(Self::Weekly),
+            "monthly" => Some(Self::Monthly),
+            "yearly" => Some(Self::Yearly),
+            "custom" => Some(Self::Custom),
+            _ => None,
+        }
+    }
+}
+
 /// Recurrence step unit (`tasks.recurrence_unit`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecurrenceUnit {
@@ -144,6 +171,29 @@ pub enum RecurrenceUnit {
     Week,
     Month,
     Year,
+}
+
+impl RecurrenceUnit {
+    /// The Gör't token for this unit (`"day"`, …).
+    pub fn as_token(self) -> &'static str {
+        match self {
+            Self::Day => "day",
+            Self::Week => "week",
+            Self::Month => "month",
+            Self::Year => "year",
+        }
+    }
+
+    /// Parse a Gör't token; `None` for unknown units.
+    pub fn from_token(token: &str) -> Option<Self> {
+        match token {
+            "day" => Some(Self::Day),
+            "week" => Some(Self::Week),
+            "month" => Some(Self::Month),
+            "year" => Some(Self::Year),
+            _ => None,
+        }
+    }
 }
 
 /// A weekday (element of `tasks.recurrence_days`, custom rules only).
@@ -158,15 +208,47 @@ pub enum Weekday {
     Sun,
 }
 
+impl Weekday {
+    /// The Gör't dow number: 0 = Sunday … 6 = Saturday.
+    pub fn to_dow(self) -> u8 {
+        match self {
+            Self::Sun => 0,
+            Self::Mon => 1,
+            Self::Tue => 2,
+            Self::Wed => 3,
+            Self::Thu => 4,
+            Self::Fri => 5,
+            Self::Sat => 6,
+        }
+    }
+
+    /// From a Gör't dow number; `None` outside 0..=6.
+    pub fn from_dow(dow: u8) -> Option<Self> {
+        match dow {
+            0 => Some(Self::Sun),
+            1 => Some(Self::Mon),
+            2 => Some(Self::Tue),
+            3 => Some(Self::Wed),
+            4 => Some(Self::Thu),
+            5 => Some(Self::Fri),
+            6 => Some(Self::Sat),
+            _ => None,
+        }
+    }
+}
+
 /// A recurrence rule (normalized `tasks.recurrence_*` columns;
 /// `None` on a task means no recurrence).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecurrenceRule {
     pub kind: RecurrenceType,
-    /// Step size, e.g. 2 for "every 2 weeks".
-    pub interval: u32,
-    pub unit: RecurrenceUnit,
-    /// Weekday set; custom rules only.
+    /// Step size in `unit`s, e.g. 2 for "every 2 weeks"; custom rules only
+    /// (always ≥ 1 after validation).
+    pub interval: Option<u32>,
+    /// Custom rules only.
+    pub unit: Option<RecurrenceUnit>,
+    /// Weekday set (sorted, unique); `Some` is always non-empty. Custom
+    /// weekly rules only; `None` means "no weekday restriction".
     pub days: Option<Vec<Weekday>>,
 }
 

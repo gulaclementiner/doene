@@ -6,3 +6,6 @@ description = "Döne pure domain logic and entities — no I/O, no UI dependenci
 
 [dependencies]
 # Intentionally empty: the core is pure (docs/plan.md §3).
+
+[dev-dependencies]
+proptest = "1"
