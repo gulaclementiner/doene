@@ -25,3 +25,20 @@ fn trash_activity_and_settings_round_trip() {
     aux::set_setting(c, "k", "2").unwrap();
     assert_eq!(aux::setting(c, "k").unwrap().as_deref(), Some("2"));
 }
+
+#[test]
+fn bulk_reads_and_wipe() {
+    let s = Storage::open_in_memory().unwrap();
+    let c = s.conn();
+    aux::insert_activity(c, "b", Some("x"), "2025-01-01T00:00:00.000Z", "created", None).unwrap();
+    aux::insert_activity(c, "a", None, "2025-01-01T00:00:00.000Z", "setting changed", Some("k")).unwrap();
+    aux::set_setting(c, "z", "1").unwrap();
+    aux::set_setting(c, "a", "2").unwrap();
+    aux::set_pref(c, "global", "[]").unwrap();
+    let ids: Vec<String> = aux::all_activity(c).unwrap().into_iter().map(|(id, _)| id).collect();
+    assert_eq!(ids, ["b", "a"], "insertion order");
+    assert_eq!(aux::all_settings(c).unwrap()[0].0, "a");
+    assert_eq!(aux::all_prefs(c).unwrap().len(), 1);
+    aux::wipe_aux(c).unwrap();
+    assert!(aux::all_activity(c).unwrap().is_empty() && aux::all_settings(c).unwrap().is_empty() && aux::all_prefs(c).unwrap().is_empty());
+}

@@ -62,6 +62,9 @@ impl From<rusqlite::Error> for ServiceError {
     }
 }
 
+mod export;
+pub use export::{EXPORT_FORMAT, EXPORT_VERSION, ImportSummary};
+
 type Res<T> = Result<T, ServiceError>;
 
 fn not_found(what: &'static str, label: &str) -> ServiceError {
@@ -375,6 +378,83 @@ fn set_focus(conn: &Connection, id: &str, date: Option<Date>) -> Res<()> {
 
 fn token(s: TaskStatus) -> &'static str {
     if s == TaskStatus::Completed { "completed" } else { "open" }
+}
+
+/// Validate one setting key/value (shared by `set_setting` and import).
+fn check_setting(key: &str, value: &Value) -> Res<()> {
+        match key {
+            "language" if !matches!(value.as_str(), Some(l) if doene_core::i18n::locales().contains(&l)) => {
+                return Err(ServiceError::Coded(CodedError {
+                    code: "error.unsupportedLanguage",
+                    message: "unsupported language".into(),
+                    params: vec![("language", show(value.as_str()))],
+                }));
+            }
+            "focusMode" if !matches!(value.as_str(), Some("daily" | "durable")) => {
+                return Err(ServiceError::Coded(CodedError {
+                    code: "error.unsupportedFocusMode",
+                    message: "unsupported focus mode".into(),
+                    params: vec![("mode", show(value.as_str()))],
+                }));
+            }
+            "theme" if !matches!(value.as_str(), Some("light" | "dark" | "system")) => {
+                return Err(ServiceError::Coded(CodedError {
+                    code: "error.unsupportedTheme",
+                    message: "unsupported theme".into(),
+                    params: vec![("theme", show(value.as_str()))],
+                }));
+            }
+            "dueNotifyTime"
+                if !matches!(value.as_str(), Some(t) if t.len() == 5 && t.as_bytes()[2] == b':'
+                    && t[..2].parse::<u8>().is_ok_and(|h| h < 24) && t[3..].parse::<u8>().is_ok_and(|m| m < 60)) =>
+            {
+                return Err(ServiceError::Coded(CodedError {
+                    code: "error.unknownSetting",
+                    message: "dueNotifyTime must be HH:MM".into(),
+                    params: vec![("k", key.to_owned())],
+                }));
+            }
+            "weekStart" if !matches!(value.as_u64(), Some(0 | 1)) => {
+                return Err(ServiceError::Coded(CodedError {
+                    code: "error.unknownSetting",
+                    message: "weekStart must be 0 or 1".into(),
+                    params: vec![("k", key.to_owned())],
+                }));
+            }
+            "showMyDayGroupHeadings" if !value.is_boolean() => {
+                return Err(ServiceError::Coded(CodedError {
+                    code: "error.unknownSetting",
+                    message: "showMyDayGroupHeadings must be a boolean".into(),
+                    params: vec![("k", key.to_owned())],
+                }));
+            }
+            "addTasksToTop" | "language" | "focusMode" | "theme" | "dueNotifyTime" | "weekStart"
+            | "showMyDayGroupHeadings" => {}
+            _ => {
+                return Err(ServiceError::Coded(CodedError {
+                    code: "error.unknownSetting",
+                    message: format!("unknown setting {key}"),
+                    params: vec![("k", key.to_owned())],
+                }));
+            }
+        }
+    Ok(())
+}
+
+/// Validate a pref scope and value (shared by `set_pref` and import).
+fn check_pref(scope: &str, value: &str) -> Res<()> {
+    let drawer_scope = scope.starts_with("drawer:") && scope.len() > "drawer:".len();
+    if !drawer_scope && scope != "global" {
+        return Err(ServiceError::Coded(CodedError {
+            code: "error.unknownPrefScope",
+            message: "unknown preference scope".into(),
+            params: vec![("scope", scope.to_owned())],
+        }));
+    }
+    if value.trim().is_empty() {
+        return Err(coded("error.prefValueRequired", "preference value required"));
+    }
+    Ok(())
 }
 
 fn show<T: ToString>(v: Option<T>) -> String {
@@ -996,17 +1076,7 @@ impl Service {
     /// Save a pref. Scopes are `drawer:<taskId>` and `global` (My Day group order); the value must be non-empty.
     /// Not undoable: layout prefs do not touch task/trash state.
     pub fn set_pref(&self, scope: &str, value: &str) -> Res<()> {
-        let drawer_scope = scope.starts_with("drawer:") && scope.len() > "drawer:".len();
-        if !drawer_scope && scope != "global" {
-            return Err(ServiceError::Coded(CodedError {
-                code: "error.unknownPrefScope",
-                message: "unknown preference scope".into(),
-                params: vec![("scope", scope.to_owned())],
-            }));
-        }
-        if value.trim().is_empty() {
-            return Err(coded("error.prefValueRequired", "preference value required"));
-        }
+        check_pref(scope, value)?;
         self.tx(|c, _| Ok(aux::set_pref(c, scope, value)?))
     }
 
@@ -1043,62 +1113,7 @@ impl Service {
     /// Set one setting (`addTasksToTop`, `focusMode`, `language`) from its JSON value.
     pub fn set_setting(&self, key: &str, value: Value) -> Res<Settings> {
         self.tx(|c, ctx| {
-            match key {
-                "language" if !matches!(value.as_str(), Some(l) if doene_core::i18n::locales().contains(&l)) => {
-                    return Err(ServiceError::Coded(CodedError {
-                        code: "error.unsupportedLanguage",
-                        message: "unsupported language".into(),
-                        params: vec![("language", show(value.as_str()))],
-                    }));
-                }
-                "focusMode" if !matches!(value.as_str(), Some("daily" | "durable")) => {
-                    return Err(ServiceError::Coded(CodedError {
-                        code: "error.unsupportedFocusMode",
-                        message: "unsupported focus mode".into(),
-                        params: vec![("mode", show(value.as_str()))],
-                    }));
-                }
-                "theme" if !matches!(value.as_str(), Some("light" | "dark" | "system")) => {
-                    return Err(ServiceError::Coded(CodedError {
-                        code: "error.unsupportedTheme",
-                        message: "unsupported theme".into(),
-                        params: vec![("theme", show(value.as_str()))],
-                    }));
-                }
-                "dueNotifyTime"
-                    if !matches!(value.as_str(), Some(t) if t.len() == 5 && t.as_bytes()[2] == b':'
-                        && t[..2].parse::<u8>().is_ok_and(|h| h < 24) && t[3..].parse::<u8>().is_ok_and(|m| m < 60)) =>
-                {
-                    return Err(ServiceError::Coded(CodedError {
-                        code: "error.unknownSetting",
-                        message: "dueNotifyTime must be HH:MM".into(),
-                        params: vec![("k", key.to_owned())],
-                    }));
-                }
-                "weekStart" if !matches!(value.as_u64(), Some(0 | 1)) => {
-                    return Err(ServiceError::Coded(CodedError {
-                        code: "error.unknownSetting",
-                        message: "weekStart must be 0 or 1".into(),
-                        params: vec![("k", key.to_owned())],
-                    }));
-                }
-                "showMyDayGroupHeadings" if !value.is_boolean() => {
-                    return Err(ServiceError::Coded(CodedError {
-                        code: "error.unknownSetting",
-                        message: "showMyDayGroupHeadings must be a boolean".into(),
-                        params: vec![("k", key.to_owned())],
-                    }));
-                }
-                "addTasksToTop" | "language" | "focusMode" | "theme" | "dueNotifyTime" | "weekStart"
-                | "showMyDayGroupHeadings" => {}
-                _ => {
-                    return Err(ServiceError::Coded(CodedError {
-                        code: "error.unknownSetting",
-                        message: format!("unknown setting {key}"),
-                        params: vec![("k", key.to_owned())],
-                    }));
-                }
-            }
+            check_setting(key, &value)?;
             aux::set_setting(c, key, &value.to_string())?;
             log(c, ctx, None, "setting changed", Some(key))?;
             settings_in(c)

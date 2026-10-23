@@ -69,6 +69,8 @@ pub struct DöneApp {
     notify_input: String,
     settings_open: bool,
     settings_error: Option<String>,
+    data_path: String,
+    data_status: Option<Result<String, String>>,
     notifier: Option<NotifyHook>,
     /// The task Alt+arrows act on (last opened/clicked task).
     selected: Option<String>,
@@ -142,6 +144,8 @@ impl DöneApp {
             notify_input: String::new(),
             settings_open: false,
             settings_error: None,
+            data_path: String::new(),
+            data_status: None,
             notifier: None,
         };
         app.reload();
@@ -591,6 +595,28 @@ impl DöneApp {
             if ui.checkbox(&mut show, self.t("settings.myDaySubHeadings")).changed() {
                 self.settings_error = crate::settings::set_headings(&self.service, show).err().map(|e| crate::drawer::error_message(&e, &self.locale));
                 reload = true;
+            }
+            ui.add_space(6.0);
+            ui.label(RichText::new(self.t("settings.data")).strong());
+            let hint = self.t("settings.dataPath");
+            ui.add(egui::TextEdit::singleline(&mut self.data_path).hint_text(hint).desired_width(260.0));
+            ui.horizontal(|ui| {
+                if ui.button(self.t("settings.exportData")).clicked() {
+                    self.data_status = Some(crate::settings::export_to_path(&self.service, &self.data_path, &self.locale));
+                }
+                if ui.button(self.t("settings.importData")).clicked() {
+                    self.data_status = Some(crate::settings::import_from_path(&self.service, &self.data_path, &self.locale));
+                    reload = true;
+                }
+            });
+            match &self.data_status {
+                Some(Ok(m)) => {
+                    ui.label(m);
+                }
+                Some(Err(e)) => {
+                    ui.colored_label(Color32::from_rgb(0xd6, 0x45, 0x45), e);
+                }
+                None => {}
             }
             if let Some(e) = &self.settings_error {
                 ui.colored_label(Color32::from_rgb(0xd6, 0x45, 0x45), e);

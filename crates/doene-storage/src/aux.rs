@@ -184,3 +184,32 @@ pub fn prune_fired(conn: &Connection, keep: usize) -> rusqlite::Result<usize> {
         params![keep as i64],
     )
 }
+
+/// Every activity row in insertion order (for export).
+pub fn all_activity(conn: &Connection) -> rusqlite::Result<Vec<(String, ActivityRow)>> {
+    let mut stmt = conn.prepare("SELECT id, task_id, at, action, detail FROM activity ORDER BY rowid")?;
+    stmt.query_map([], |r| {
+        Ok((
+            r.get(0)?,
+            ActivityRow { task_id: r.get(1)?, at: r.get(2)?, action: r.get(3)?, detail: r.get(4)? },
+        ))
+    })?
+    .collect()
+}
+
+/// Every setting `(key, text)` ordered by key.
+pub fn all_settings(conn: &Connection) -> rusqlite::Result<Vec<(String, String)>> {
+    let mut stmt = conn.prepare("SELECT key, value FROM settings ORDER BY key")?;
+    stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()
+}
+
+/// Every pref `(scope, text)` ordered by scope.
+pub fn all_prefs(conn: &Connection) -> rusqlite::Result<Vec<(String, String)>> {
+    let mut stmt = conn.prepare("SELECT scope, value FROM prefs ORDER BY scope")?;
+    stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()
+}
+
+/// Delete all activity, settings and prefs rows (the aux part of an import wipe).
+pub fn wipe_aux(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch("DELETE FROM activity; DELETE FROM settings; DELETE FROM prefs;")
+}
