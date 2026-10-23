@@ -3,15 +3,16 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use doene_core::quickadd::{QuickAddOptions, QuickAddView, quick_add};
 use doene_core::recurrence::{RawRecurrence, next_on_or_after, validate};
 use doene_core::{
-    CodedError, Date, FocusMode, HydratedTask, Importance, Step, Tag, Task, TaskStatus, TrashKind,
+    CodedError, Date, RawView, View, ViewRules, normalise_view, FocusMode, HydratedTask, Importance, Step, Tag, Task, TaskStatus, TrashKind,
     nlp::ImportanceLevel, search_tasks, tree,
 };
 use doene_storage::aux::{self, ActivityRow, TrashRow};
+use doene_storage::views::{self, SavedView};
 use doene_storage::{Storage, tasks};
 use rusqlite::Connection;
 use serde_json::{Value, json};
 
-use crate::snapshot::{task_from_json, task_json};
+use crate::snapshot::{task_from_json, task_json, view_from_json, view_json};
 
 /// Days a trashed entry is kept before it is purged.
 pub const TRASH_DAYS: i64 = 30;
@@ -183,6 +184,7 @@ struct UndoEntry {
     kind: UndoKind,
     tasks: Vec<HydratedTask>,
     trash: Vec<TrashRow>,
+    views: Vec<SavedView>,
 }
 
 fn system_now() -> String {
@@ -208,6 +210,21 @@ fn normalise_tag(raw: &str) -> Option<Tag> {
     let w = w.trim_start_matches(['#', '@']);
     let w = w.split_whitespace().collect::<Vec<_>>().join("-");
     Tag::new(&w).ok()
+}
+
+fn saved_from_rules(id: String, r: ViewRules, position: f64) -> SavedView {
+    SavedView {
+        view: View {
+            id,
+            name: r.name,
+            emoji: r.emoji.filter(|e| !e.trim().is_empty()),
+            match_mode: r.match_mode,
+            show_done: r.show_done,
+            position,
+            tags: normalise_tags(&r.tags),
+        },
+        sorts: r.sorts,
+    }
 }
 
 fn normalise_tags(raw: &[String]) -> Vec<Tag> {
@@ -532,7 +549,7 @@ impl Service {
     fn tx_undoable<T>(&self, kind: UndoKind, f: impl FnOnce(&Connection, &Ctx) -> Res<T>) -> Res<T> {
         let ctx = self.ctx();
         let tx = self.storage.conn().unchecked_transaction()?;
-        let entry = UndoEntry { kind, tasks: tasks::all_tasks(&tx)?, trash: aux::trash(&tx)? };
+        let entry = UndoEntry { kind, tasks: tasks::all_tasks(&tx)?, trash: aux::trash(&tx)?, views: views::all(&tx)? };
         let out = f(&tx, &ctx)?;
         tx.commit()?;
         let mut stack = self.undo.lock().unwrap_or_else(|e| e.into_inner());
@@ -590,6 +607,14 @@ impl Service {
                 aux::empty_trash(c)?;
                 for t in &entry.trash {
                     aux::insert_trash(c, t)?;
+                }
+            }
+            if views::all(c)? != entry.views {
+                for v in views::all(c)? {
+                    views::delete(c, &v.view.id)?;
+                }
+                for v in &entry.views {
+                    views::insert(c, v)?;
                 }
             }
             log(c, ctx, None, "undone", None)
@@ -847,7 +872,15 @@ impl Service {
             let row = aux::trash_entry(c, id)?.ok_or_else(|| not_found("what.trashEntry", "trash entry"))?;
             let data: Value = serde_json::from_str(&row.data).unwrap_or(Value::Null);
             if row.kind == "view" {
-                return Ok(Restored::View { id: data["view"]["id"].as_str().unwrap_or_default().to_owned() });
+                let mut v = view_from_json(&data["view"]).ok_or_else(|| not_found("what.trashEntry", "trash entry"))?;
+                if views::get(c, &v.view.id)?.is_some() {
+                    return Err(coded("error.viewExists", "view already exists"));
+                }
+                v.view.position = views::max_position(c)?.unwrap_or(0.0) + 1.0;
+                views::insert(c, &v)?;
+                aux::delete_trash(c, id)?;
+                log(c, ctx, None, "view restored", Some(&v.view.name))?;
+                return Ok(Restored::View { id: v.view.id });
             }
             let mut items: Vec<HydratedTask> = std::iter::once(&data["task"])
                 .chain(data["subtasks"].as_array().into_iter().flatten())
@@ -870,6 +903,68 @@ impl Service {
             aux::delete_trash(c, id)?;
             log(c, ctx, Some(&root_id), "restored", Some(&items[0].task.subject))?;
             Ok(Restored::Task(need(c, &root_id)?))
+        })
+    }
+
+    // ---- views
+
+    /// Saved views in rail order.
+    pub fn views(&self) -> Res<Vec<SavedView>> {
+        Ok(views::all(self.storage.conn())?)
+    }
+
+    /// Create a view from raw form fields (validated by core `normalise_view`).
+    /// It is appended to the rail.
+    pub fn create_view(&self, raw: RawView) -> Res<SavedView> {
+        self.tx_undoable(UndoKind::Create, |c, ctx| {
+            let rules = normalise_view(&raw)?;
+            let v = saved_from_rules(new_id(), rules, views::max_position(c)?.unwrap_or(0.0) + 1.0);
+            views::insert(c, &v)?;
+            log(c, ctx, None, "view created", Some(&v.view.name))?;
+            Ok(v)
+        })
+    }
+
+    /// Replace a view's fields (name, emoji, tags, match, sorts, include-completed).
+    pub fn update_view(&self, id: &str, raw: RawView) -> Res<SavedView> {
+        self.tx_undoable(UndoKind::Edit, |c, ctx| {
+            let cur = views::get(c, id)?.ok_or_else(|| not_found("what.view", "view"))?;
+            let v = saved_from_rules(id.to_owned(), normalise_view(&raw)?, cur.view.position);
+            views::update(c, &v)?;
+            log(c, ctx, None, "view updated", Some(&v.view.name))?;
+            Ok(v)
+        })
+    }
+
+    /// Move a view to the trash (restorable); returns the trash entry id.
+    pub fn delete_view(&self, id: &str) -> Res<String> {
+        self.tx_undoable(UndoKind::Delete, |c, ctx| {
+            let v = views::get(c, id)?.ok_or_else(|| not_found("what.view", "view"))?;
+            let trash_id = new_id();
+            aux::insert_trash(c, &TrashRow {
+                id: trash_id.clone(),
+                kind: "view".into(),
+                label: Some(v.view.name.clone()),
+                data: json!({ "view": view_json(&v) }).to_string(),
+                deleted_at: ctx.now.clone(),
+            })?;
+            views::delete(c, id)?;
+            log(c, ctx, None, "view deleted", Some(&v.view.name))?;
+            Ok(trash_id)
+        })
+    }
+
+    /// Move a view to `index` in the rail; positions are renumbered gap-free 1..n.
+    pub fn move_view(&self, id: &str, index: usize) -> Res<()> {
+        self.tx_undoable(UndoKind::Move, |c, ctx| {
+            let mut order: Vec<String> = views::all(c)?.into_iter().map(|v| v.view.id).collect();
+            let from = order.iter().position(|v| v == id).ok_or_else(|| not_found("what.view", "view"))?;
+            let moved = order.remove(from);
+            order.insert(index.min(order.len()), moved);
+            for (i, vid) in order.iter().enumerate() {
+                views::set_position(c, vid, (i + 1) as f64)?;
+            }
+            log(c, ctx, None, "view moved", Some(id))
         })
     }
 

@@ -9,6 +9,9 @@ use crate::errors::CodedError;
 /// The sort fields a view can order by, in picker order.
 pub const SORT_KEYS: [&str; 4] = ["name", "due", "created", "manual"];
 
+/// Most chained sort levels a view may have.
+pub const MAX_SORTS: usize = 6;
+
 /// A view's sort field (Gör't's `SORT_KEYS` tokens).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortKey {
@@ -100,6 +103,14 @@ pub fn normalise_view(v: &RawView) -> Result<ViewRules, CodedError> {
             ));
         }
     };
+
+    if v.sorts.len() > MAX_SORTS {
+        return Err(CodedError {
+            code: "error.viewSortTooMany",
+            message: format!("at most {MAX_SORTS} sort levels"),
+            params: vec![("max", MAX_SORTS.to_string())],
+        });
+    }
 
     let mut sorts = Vec::with_capacity(v.sorts.len());
     for s in &v.sorts {

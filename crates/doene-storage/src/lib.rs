@@ -11,6 +11,7 @@ use rusqlite::Connection;
 pub mod aux;
 pub mod migrations;
 pub mod tasks;
+pub mod views;
 
 pub use migrations::SCHEMA_VERSION;
 

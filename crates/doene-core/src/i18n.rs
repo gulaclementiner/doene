@@ -798,6 +798,8 @@ mod tests {
             "error.viewNameRequired",
             "error.viewMatchInvalid",
             "error.viewSortInvalidKey",
+            "error.viewSortTooMany",
+            "error.viewExists",
             "error.recurrenceTypeInvalid",
             "error.recurrenceInvalid",
             "error.recurrenceUnitInvalid",
