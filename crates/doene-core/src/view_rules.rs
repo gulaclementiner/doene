@@ -3,8 +3,15 @@
 
 use std::cmp::Ordering;
 
-use crate::entities::{HydratedTask, MatchMode, Tag, TaskStatus};
+use crate::entities::{HydratedTask, MatchMode, Tag, TaskStatus, View};
 use crate::errors::CodedError;
+
+/// A view with its chained sort levels (level 0 first).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SavedView {
+    pub view: View,
+    pub sorts: Vec<SortLevel>,
+}
 
 /// The sort fields a view can order by, in picker order.
 pub const SORT_KEYS: [&str; 4] = ["name", "due", "created", "manual"];

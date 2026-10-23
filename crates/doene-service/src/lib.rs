@@ -10,9 +10,8 @@
 mod service;
 mod snapshot;
 
-pub use doene_core::CodedError;
-pub use doene_storage::views::SavedView;
+pub use doene_core::{CodedError, SavedView};
 pub use service::{
-    Clock, EXPORT_FORMAT, EXPORT_VERSION, ImportSummary, NewTask, Restored, Service, ServiceError,
-    Settings, StepPatch, TRASH_DAYS, TaskPatch, TrashItem, UndoKind, UpdateOutcome,
+    ActivityEntry, Clock, EXPORT_FORMAT, EXPORT_VERSION, ImportSummary, NewTask, Restored, Service,
+    ServiceError, Settings, StepPatch, TRASH_DAYS, TaskPatch, TrashItem, UndoKind, UpdateOutcome,
 };

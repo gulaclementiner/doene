@@ -4,12 +4,7 @@
 use doene_core::{MatchMode, SortDirection, SortKey, SortLevel, Tag, View};
 use rusqlite::{Connection, OptionalExtension, params};
 
-/// A view with its chained sort levels (level 0 first).
-#[derive(Debug, Clone, PartialEq)]
-pub struct SavedView {
-    pub view: View,
-    pub sorts: Vec<SortLevel>,
-}
+pub use doene_core::SavedView;
 
 fn key_token(k: SortKey) -> &'static str {
     match k {

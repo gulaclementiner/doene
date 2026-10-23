@@ -1,12 +1,12 @@
 //! JSON snapshots of tasks for the trash (`trash.data`): the task, its steps and
 //! tags, plus its whole subtree, parents first so foreign keys hold on restore.
 
+use doene_core::SavedView;
 use doene_core::{
     Date, HydratedTask, Importance, RecurrenceRule, RecurrenceType, RecurrenceUnit, Step, Tag,
     Task, TaskStatus, Weekday,
 };
 use doene_core::{MatchMode, SortDirection, SortKey, SortLevel, View};
-use doene_storage::views::SavedView;
 use serde_json::{Value, json};
 
 fn status(s: TaskStatus) -> &'static str {

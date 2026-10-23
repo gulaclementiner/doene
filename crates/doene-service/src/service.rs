@@ -3,11 +3,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use doene_core::quickadd::{QuickAddOptions, QuickAddView, quick_add};
 use doene_core::recurrence::{RawRecurrence, next_on_or_after, validate};
 use doene_core::{
-    CodedError, Date, FocusMode, HydratedTask, Importance, RawView, Step, Tag, Task, TaskStatus,
-    TrashKind, View, ViewRules, nlp::ImportanceLevel, normalise_view, search_tasks, tree,
+    CodedError, Date, FocusMode, HydratedTask, Importance, RawView, SavedView, Step, Tag, Task,
+    TaskStatus, TrashKind, View, ViewRules, nlp::ImportanceLevel, normalise_view, search_tasks,
+    tree,
 };
 use doene_storage::aux::{self, ActivityRow, TrashRow};
-use doene_storage::views::{self, SavedView};
+use doene_storage::views;
 use doene_storage::{Storage, tasks};
 use rusqlite::Connection;
 use serde_json::{Value, json};
@@ -135,6 +136,15 @@ pub struct TrashItem {
     pub kind: TrashKind,
     pub label: Option<String>,
     pub deleted_at: String,
+}
+
+/// One activity-log entry as the UI sees it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActivityEntry {
+    pub task_id: Option<String>,
+    pub at: String,
+    pub action: String,
+    pub detail: Option<String>,
 }
 
 /// What a restore brought back.
@@ -844,8 +854,16 @@ impl Service {
     }
 
     /// A task's activity, newest first.
-    pub fn activity(&self, id: &str) -> Res<Vec<ActivityRow>> {
-        Ok(aux::activity_of(self.storage.conn(), id)?)
+    pub fn activity(&self, id: &str) -> Res<Vec<ActivityEntry>> {
+        Ok(aux::activity_of(self.storage.conn(), id)?
+            .into_iter()
+            .map(|a| ActivityEntry {
+                task_id: a.task_id,
+                at: a.at,
+                action: a.action,
+                detail: a.detail,
+            })
+            .collect())
     }
 
     /// Ranked search (core scoring); all words required.
