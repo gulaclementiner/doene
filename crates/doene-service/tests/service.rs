@@ -492,3 +492,28 @@ fn view_move_renumbers_gap_free() {
     f.svc.undo().unwrap();
     assert_eq!(f.svc.views().unwrap()[0].view.name, "C");
 }
+
+#[test]
+fn due_notifications_are_persisted_deduped_and_pruned() {
+    let f = fixture();
+    let t = f.svc.create_task(NewTask { subject: "Pay".into(), due_date: Some(d("2025-03-10")), ..Default::default() }).unwrap();
+    assert!(f.svc.take_due_notifications("2025-03-10T08:00").unwrap().is_empty());
+    let got = f.svc.take_due_notifications("2025-03-10T09:00").unwrap();
+    assert_eq!(got.len(), 1);
+    assert_eq!(got[0].key, format!("d:{}:2025-03-10", t.task.id));
+    assert!(f.svc.take_due_notifications("2025-03-10T10:00").unwrap().is_empty());
+    f.svc.set_setting("dueNotifyTime", json!("12:00")).unwrap();
+    assert!(f.svc.set_setting("dueNotifyTime", json!("25:00")).is_err());
+}
+
+#[test]
+fn fired_set_is_pruned_to_last_500_keys() {
+    let dir = tempfile::tempdir().unwrap();
+    let st = Storage::open(&dir.path().join("d.db")).unwrap();
+    for i in 0..510 {
+        doene_storage::aux::mark_fired(st.conn(), &format!("k{i}"), "x").unwrap();
+    }
+    doene_storage::aux::prune_fired(st.conn(), 500).unwrap();
+    let keys = doene_storage::aux::fired_keys(st.conn()).unwrap();
+    assert_eq!((keys.len(), keys[0].as_str()), (500, "k10"));
+}

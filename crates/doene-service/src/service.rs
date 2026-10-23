@@ -999,6 +999,29 @@ impl Service {
         settings_in(self.storage.conn())
     }
 
+    /// Notifications due at `now_local` (`YYYY-MM-DDTHH:MM` local time) that have not fired yet.
+    /// They are recorded as fired (persisted, pruned to the newest 500) before being returned,
+    /// so none repeats across ticks or restarts.
+    pub fn take_due_notifications(&self, now_local: &str) -> Res<Vec<doene_core::notifications::Notification>> {
+        use doene_core::notifications as n;
+        self.tx(|c, ctx| {
+            let fired: std::collections::HashSet<String> = aux::fired_keys(c)?.into_iter().collect();
+            let get = |k: &str| -> Res<Option<String>> {
+                Ok(aux::setting(c, k)?.and_then(|s| serde_json::from_str::<Value>(&s).ok()).and_then(|v| v.as_str().map(str::to_owned)))
+            };
+            let time = get("dueNotifyTime")?.unwrap_or_else(|| n::DEFAULT_DUE_NOTIFY_TIME.into());
+            let lang = get("language")?.unwrap_or_else(|| "en".into());
+            let due = n::due_notifications(&tasks::all_tasks(c)?, now_local, &fired, &time, &lang);
+            for x in &due {
+                aux::mark_fired(c, &x.key, &ctx.now)?;
+            }
+            if !due.is_empty() {
+                aux::prune_fired(c, n::FIRED_KEEP)?;
+            }
+            Ok(due)
+        })
+    }
+
     /// Set one setting (`addTasksToTop`, `focusMode`, `language`) from its JSON value.
     pub fn set_setting(&self, key: &str, value: Value) -> Res<Settings> {
         self.tx(|c, ctx| {
@@ -1024,7 +1047,17 @@ impl Service {
                         params: vec![("theme", show(value.as_str()))],
                     }));
                 }
-                "addTasksToTop" | "language" | "focusMode" | "theme" => {}
+                "dueNotifyTime"
+                    if !matches!(value.as_str(), Some(t) if t.len() == 5 && t.as_bytes()[2] == b':'
+                        && t[..2].parse::<u8>().is_ok_and(|h| h < 24) && t[3..].parse::<u8>().is_ok_and(|m| m < 60)) =>
+                {
+                    return Err(ServiceError::Coded(CodedError {
+                        code: "error.unknownSetting",
+                        message: "dueNotifyTime must be HH:MM".into(),
+                        params: vec![("k", key.to_owned())],
+                    }));
+                }
+                "addTasksToTop" | "language" | "focusMode" | "theme" | "dueNotifyTime" => {}
                 _ => {
                     return Err(ServiceError::Coded(CodedError {
                         code: "error.unknownSetting",
