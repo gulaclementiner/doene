@@ -3,10 +3,15 @@
 use doene_core::{Date, SortKey};
 use doene_service::{NewTask, Service};
 use doene_storage::Storage;
-use doene_ui::views::{ViewDraft, SortDraft, describe, drop_index, rail_rows, view_color, view_rows};
+use doene_ui::views::{
+    SortDraft, ViewDraft, describe, drop_index, rail_rows, view_color, view_rows,
+};
 
 fn svc() -> Service {
-    Service::with_clock(Storage::open_in_memory().unwrap(), Box::new(|| "2025-03-10T09:00:00.000Z".into()))
+    Service::with_clock(
+        Storage::open_in_memory().unwrap(),
+        Box::new(|| "2025-03-10T09:00:00.000Z".into()),
+    )
 }
 
 fn today() -> Date {
@@ -47,20 +52,32 @@ fn saved_view_shows_matching_tasks_sorted_and_round_trips_to_form() {
     task(&s, "A task", &["work", "home"], Some("2025-03-20"));
     task(&s, "C task", &["home"], None);
     let done = task(&s, "D done", &["work"], None);
-    s.update_task(&done, doene_service::TaskPatch { status: Some(doene_core::TaskStatus::Completed), ..Default::default() })
-        .unwrap();
+    s.update_task(
+        &done,
+        doene_service::TaskPatch {
+            status: Some(doene_core::TaskStatus::Completed),
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     let mut d = ViewDraft::new();
     d.name = "Work".into();
     d.emoji = "💼".into();
     d.new_tag = "#Work".into();
     d.commit_tag();
-    d.sorts = vec![SortDraft { by: SortKey::Due, desc: true }];
+    d.sorts = vec![SortDraft {
+        by: SortKey::Due,
+        desc: true,
+    }];
     let id = d.save(&s).unwrap();
 
     let views = s.views().unwrap();
     let names = |show: &doene_service::SavedView| {
-        view_rows(show, &s.all_tasks().unwrap(), today(), "en").into_iter().map(|r| r.subject).collect::<Vec<_>>()
+        view_rows(show, &s.all_tasks().unwrap(), today(), "en")
+            .into_iter()
+            .map(|r| r.subject)
+            .collect::<Vec<_>>()
     };
     assert_eq!(names(&views[0]), ["A task", "B task"]);
 
@@ -69,7 +86,10 @@ fn saved_view_shows_matching_tasks_sorted_and_round_trips_to_form() {
     assert_eq!(e.id.as_deref(), Some(id.as_str()));
     assert_eq!(e.tags, ["work"]);
     e.show_done = true;
-    e.sorts = vec![SortDraft { by: SortKey::Name, desc: false }];
+    e.sorts = vec![SortDraft {
+        by: SortKey::Name,
+        desc: false,
+    }];
     e.save(&s).unwrap();
     let v = &s.views().unwrap()[0];
     assert_eq!(names(v), ["A task", "B task", "D done"]);
@@ -105,6 +125,18 @@ fn describe_summarises_rules() {
     let mut d = ViewDraft::new();
     assert_eq!(describe(&d, "en"), "every task");
     d.tags = vec!["a".into(), "b".into()];
-    d.sorts = vec![SortDraft { by: SortKey::Name, desc: false }, SortDraft { by: SortKey::Due, desc: false }];
-    assert_eq!(describe(&d, "en"), "Tagged #a or #b, by name, then due date");
+    d.sorts = vec![
+        SortDraft {
+            by: SortKey::Name,
+            desc: false,
+        },
+        SortDraft {
+            by: SortKey::Due,
+            desc: false,
+        },
+    ];
+    assert_eq!(
+        describe(&d, "en"),
+        "Tagged #a or #b, by name, then due date"
+    );
 }

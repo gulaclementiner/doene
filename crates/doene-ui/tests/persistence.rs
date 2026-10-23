@@ -7,13 +7,25 @@ use doene_ui::{Theme, list_rows};
 use serde_json::json;
 
 fn open(path: &std::path::Path) -> Service {
-    Service::with_clock(Storage::open(path).unwrap(), Box::new(|| "2025-03-10T09:00:00.000Z".into()))
+    Service::with_clock(
+        Storage::open(path).unwrap(),
+        Box::new(|| "2025-03-10T09:00:00.000Z".into()),
+    )
 }
 
 fn all_rows(svc: &Service) -> Vec<doene_ui::TaskRow> {
     let s = svc.settings().unwrap();
-    let settings = SmartSettings { focus_mode: s.focus_mode, ..Default::default() };
-    list_rows(SmartList::All, &svc.all_tasks().unwrap(), Date::parse("2025-03-10").unwrap(), settings, &s.language)
+    let settings = SmartSettings {
+        focus_mode: s.focus_mode,
+        ..Default::default()
+    };
+    list_rows(
+        SmartList::All,
+        &svc.all_tasks().unwrap(),
+        Date::parse("2025-03-10").unwrap(),
+        settings,
+        &s.language,
+    )
 }
 
 #[test]
@@ -22,7 +34,8 @@ fn composer_line_persists_across_reopen_with_theme() {
     let db = dir.path().join("done.db");
     let before = {
         let svc = open(&db);
-        svc.quick_add("Pay rent tomorrow #home !high", None, false).unwrap();
+        svc.quick_add("Pay rent tomorrow #home !high", None, false)
+            .unwrap();
         svc.quick_add("Buy milk", None, false).unwrap();
         svc.set_setting("theme", json!(Theme::Dark.id())).unwrap();
         all_rows(&svc)
@@ -49,7 +62,12 @@ fn settings_and_language_persist_across_reopen_and_first_run_detects_os_locale()
         let s = settings::init_language(&svc, Some("sv-SE")).unwrap();
         assert_eq!((s.language.as_str(), s.week_start), ("sv", 1));
         // Later OS locale changes do not override a saved choice.
-        assert_eq!(settings::init_language(&svc, Some("en-US")).unwrap().language, "sv");
+        assert_eq!(
+            settings::init_language(&svc, Some("en-US"))
+                .unwrap()
+                .language,
+            "sv"
+        );
         settings::set_language(&svc, "en").unwrap();
         settings::set_week_start(&svc, 1).unwrap();
         settings::set_headings(&svc, false).unwrap();
@@ -59,7 +77,14 @@ fn settings_and_language_persist_across_reopen_and_first_run_detects_os_locale()
     let svc = open(&db);
     let s = settings::init_language(&svc, Some("sv")).unwrap();
     assert_eq!(s.language, "en");
-    assert_eq!((s.week_start, s.due_notify_time.as_str(), s.show_my_day_headings), (1, "08:15", false));
+    assert_eq!(
+        (
+            s.week_start,
+            s.due_notify_time.as_str(),
+            s.show_my_day_headings
+        ),
+        (1, "08:15", false)
+    );
 }
 
 #[test]

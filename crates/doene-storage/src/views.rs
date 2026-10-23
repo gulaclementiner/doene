@@ -30,12 +30,18 @@ fn load(conn: &Connection, mut view: View) -> rusqlite::Result<SavedView> {
         .collect();
     let sorts = conn
         .prepare("SELECT by, dir FROM view_sorts WHERE view_id = ?1 ORDER BY level")?
-        .query_map(params![view.id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .query_map(params![view.id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?
         .filter_map(|r| r.ok())
         .filter_map(|(by, dir)| {
             Some(SortLevel {
                 by: SortKey::from_token(&by)?,
-                dir: if dir == "desc" { SortDirection::Desc } else { SortDirection::Asc },
+                dir: if dir == "desc" {
+                    SortDirection::Desc
+                } else {
+                    SortDirection::Asc
+                },
             })
         })
         .collect();
@@ -47,7 +53,11 @@ fn view_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<View> {
         id: r.get(0)?,
         name: r.get(1)?,
         emoji: r.get(2)?,
-        match_mode: if r.get::<_, String>(3)? == "all" { MatchMode::All } else { MatchMode::Any },
+        match_mode: if r.get::<_, String>(3)? == "all" {
+            MatchMode::All
+        } else {
+            MatchMode::Any
+        },
         show_done: r.get::<_, i64>(4)? != 0,
         position: r.get(5)?,
         tags: vec![],
@@ -57,7 +67,9 @@ fn view_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<View> {
 /// Every view in rail order, with tags and sorts.
 pub fn all(conn: &Connection) -> rusqlite::Result<Vec<SavedView>> {
     let views: Vec<View> = conn
-        .prepare(&format!("SELECT {VIEW_COLUMNS} FROM views ORDER BY position, id"))?
+        .prepare(&format!(
+            "SELECT {VIEW_COLUMNS} FROM views ORDER BY position, id"
+        ))?
         .query_map([], view_from_row)?
         .collect::<rusqlite::Result<_>>()?;
     views.into_iter().map(|v| load(conn, v)).collect()
@@ -66,14 +78,24 @@ pub fn all(conn: &Connection) -> rusqlite::Result<Vec<SavedView>> {
 /// One view by id.
 pub fn get(conn: &Connection, id: &str) -> rusqlite::Result<Option<SavedView>> {
     let v = conn
-        .query_row(&format!("SELECT {VIEW_COLUMNS} FROM views WHERE id = ?1"), params![id], view_from_row)
+        .query_row(
+            &format!("SELECT {VIEW_COLUMNS} FROM views WHERE id = ?1"),
+            params![id],
+            view_from_row,
+        )
         .optional()?;
     v.map(|v| load(conn, v)).transpose()
 }
 
 fn write_children(conn: &Connection, v: &SavedView) -> rusqlite::Result<()> {
-    conn.execute("DELETE FROM view_tags WHERE view_id = ?1", params![v.view.id])?;
-    conn.execute("DELETE FROM view_sorts WHERE view_id = ?1", params![v.view.id])?;
+    conn.execute(
+        "DELETE FROM view_tags WHERE view_id = ?1",
+        params![v.view.id],
+    )?;
+    conn.execute(
+        "DELETE FROM view_sorts WHERE view_id = ?1",
+        params![v.view.id],
+    )?;
     for t in &v.view.tags {
         conn.execute(
             "INSERT OR IGNORE INTO view_tags (view_id, tag) VALUES (?1, ?2)",
@@ -87,7 +109,11 @@ fn write_children(conn: &Connection, v: &SavedView) -> rusqlite::Result<()> {
                 v.view.id,
                 i as i64,
                 key_token(s.by),
-                if s.dir == SortDirection::Desc { "desc" } else { "asc" }
+                if s.dir == SortDirection::Desc {
+                    "desc"
+                } else {
+                    "asc"
+                }
             ],
         )?;
     }
@@ -111,14 +137,24 @@ pub fn insert(conn: &Connection, v: &SavedView) -> rusqlite::Result<()> {
 pub fn update(conn: &Connection, v: &SavedView) -> rusqlite::Result<()> {
     conn.execute(
         "UPDATE views SET name=?2, emoji=?3, match_mode=?4, show_done=?5, position=?6 WHERE id=?1",
-        params![v.view.id, v.view.name, v.view.emoji, mode(v.view.match_mode), v.view.show_done, v.view.position],
+        params![
+            v.view.id,
+            v.view.name,
+            v.view.emoji,
+            mode(v.view.match_mode),
+            v.view.show_done,
+            v.view.position
+        ],
     )?;
     write_children(conn, v)
 }
 
 /// Set only a view's rail position.
 pub fn set_position(conn: &Connection, id: &str, position: f64) -> rusqlite::Result<()> {
-    conn.execute("UPDATE views SET position = ?2 WHERE id = ?1", params![id, position])?;
+    conn.execute(
+        "UPDATE views SET position = ?2 WHERE id = ?1",
+        params![id, position],
+    )?;
     Ok(())
 }
 

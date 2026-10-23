@@ -3,8 +3,8 @@
 
 use doene_core::agenda::{AgendaOptions, agenda};
 use doene_core::{
-    DEFAULT_SORT, Date, HydratedTask, SECTION_BREAK, SmartSettings, agenda_layout_save, agenda_order_for,
-    visible_order,
+    DEFAULT_SORT, Date, HydratedTask, SECTION_BREAK, SmartSettings, agenda_layout_save,
+    agenda_order_for, visible_order,
 };
 use doene_service::{Service, ServiceError};
 
@@ -55,10 +55,15 @@ pub fn my_day_view(
         sort: DEFAULT_SORT,
         focus_mode: settings.focus_mode,
     };
-    let Ok(a) = agenda(&bare, &opts) else { return MyDayView::default() };
+    let Ok(a) = agenda(&bare, &opts) else {
+        return MyDayView::default();
+    };
     let today_s = today.to_string();
     let row = |id: &str| {
-        tasks.iter().find(|h| h.task.id == id).map(|h| task_row(h, today, &today_s, locale))
+        tasks
+            .iter()
+            .find(|h| h.task.id == id)
+            .map(|h| task_row(h, today, &today_s, locale))
     };
     let sections = a
         .sections
@@ -80,7 +85,10 @@ pub fn my_day_view(
         })
         .collect();
     let completed = a.completed.iter().filter_map(|t| row(&t.id)).collect();
-    MyDayView { sections, completed }
+    MyDayView {
+        sections,
+        completed,
+    }
 }
 
 /// The saved group order (global prefs), cleaned; the default when unsaved.
@@ -91,14 +99,20 @@ pub fn load_my_day_order(service: &Service) -> Vec<String> {
         .flatten()
         .and_then(|v| serde_json::from_str::<serde_json::Value>(&v).ok())
         .and_then(|v| {
-            v.get("myDayGroupOrder")?.as_array().map(|a| a.iter().map(|k| k.as_str().map(str::to_owned)).collect())
+            v.get("myDayGroupOrder")?
+                .as_array()
+                .map(|a| a.iter().map(|k| k.as_str().map(str::to_owned)).collect())
         });
     agenda_order_for(saved.as_deref())
 }
 
 /// Move the order item (group or break) at `index` by `delta` (clamped) and
 /// persist; returns the new order.
-pub fn move_my_day_item(service: &Service, index: usize, delta: i32) -> Result<Vec<String>, ServiceError> {
+pub fn move_my_day_item(
+    service: &Service,
+    index: usize,
+    delta: i32,
+) -> Result<Vec<String>, ServiceError> {
     let mut order = load_my_day_order(service);
     let to = (index as i32 + delta).clamp(0, order.len() as i32 - 1) as usize;
     if index < order.len() && to != index {
@@ -115,14 +129,18 @@ pub fn move_my_day_item(service: &Service, index: usize, delta: i32) -> Result<V
 
 /// Locale key of an order item in the layout editor.
 pub fn order_item_key(key: &str) -> String {
-    if key == SECTION_BREAK { "myday.break".into() } else { format!("myday.group.{key}") }
+    if key == SECTION_BREAK {
+        "myday.break".into()
+    } else {
+        format!("myday.group.{key}")
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use doene_core::{Importance, Task, TaskStatus};
     use doene_core::default_order;
+    use doene_core::{Importance, Task, TaskStatus};
     use doene_storage::Storage;
 
     fn d(s: &str) -> Date {
@@ -164,8 +182,18 @@ mod tests {
         let tasks = vec![
             task("late", Some("2025-03-10"), TaskStatus::Open, None),
             task("now", Some(TODAY), TaskStatus::Open, None),
-            task("b", None, TaskStatus::Completed, Some("2025-03-12T15:00:00.000Z")),
-            task("a", None, TaskStatus::Completed, Some("2025-03-12T08:00:00.000Z")),
+            task(
+                "b",
+                None,
+                TaskStatus::Completed,
+                Some("2025-03-12T15:00:00.000Z"),
+            ),
+            task(
+                "a",
+                None,
+                TaskStatus::Completed,
+                Some("2025-03-12T08:00:00.000Z"),
+            ),
         ];
         let v = view(&tasks, &default_order());
         assert_eq!(v.sections.len(), 2);
@@ -183,9 +211,16 @@ mod tests {
             task("late", Some("2025-03-10"), TaskStatus::Open, None),
             task("now", Some(TODAY), TaskStatus::Open, None),
         ];
-        let order: Vec<String> = ["overdue", "starred-due", "shortlisted", "due-today", "break", "radar"]
-            .map(String::from)
-            .to_vec();
+        let order: Vec<String> = [
+            "overdue",
+            "starred-due",
+            "shortlisted",
+            "due-today",
+            "break",
+            "radar",
+        ]
+        .map(String::from)
+        .to_vec();
         let v = view(&tasks, &order);
         assert_eq!(v.sections.len(), 1);
         assert_eq!(v.sections[0].groups.len(), 2);
@@ -194,7 +229,12 @@ mod tests {
 
     #[test]
     fn midnight_expiry_drops_yesterdays_completions() {
-        let tasks = vec![task("old", None, TaskStatus::Completed, Some("2025-03-11T23:59:00.000Z"))];
+        let tasks = vec![task(
+            "old",
+            None,
+            TaskStatus::Completed,
+            Some("2025-03-11T23:59:00.000Z"),
+        )];
         assert!(view(&tasks, &default_order()).is_empty());
     }
 

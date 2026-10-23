@@ -35,7 +35,11 @@ pub const KEYS: &[&str] = &[
 pub fn parse_notify_time(input: &str) -> Option<String> {
     let t = input.trim();
     let (h, m) = t.split_once(':')?;
-    if h.is_empty() || h.len() > 2 || m.len() != 2 || !(h.bytes().chain(m.bytes())).all(|b| b.is_ascii_digit()) {
+    if h.is_empty()
+        || h.len() > 2
+        || m.len() != 2
+        || !(h.bytes().chain(m.bytes())).all(|b| b.is_ascii_digit())
+    {
         return None;
     }
     let (h, m): (u8, u8) = (h.parse().ok()?, m.parse().ok()?);
@@ -92,11 +96,16 @@ pub fn set_notify_time(service: &Service, input: &str, locale: &str) -> Result<S
     let Some(t) = parse_notify_time(input) else {
         return Err(tr("settings.dueNotifyTime", &HashMap::new(), Some(locale)) + " (HH:MM)");
     };
-    service.set_setting("dueNotifyTime", json!(t)).map_err(|e| crate::drawer::error_message(&e, locale))
+    service
+        .set_setting("dueNotifyTime", json!(t))
+        .map_err(|e| crate::drawer::error_message(&e, locale))
 }
 
 fn msg(key: &str, params: &[(&str, String)], locale: &str) -> String {
-    let p: HashMap<String, Option<String>> = params.iter().map(|(k, v)| ((*k).to_owned(), Some(v.clone()))).collect();
+    let p: HashMap<String, Option<String>> = params
+        .iter()
+        .map(|(k, v)| ((*k).to_owned(), Some(v.clone())))
+        .collect();
     tr(key, &p, Some(locale))
 }
 
@@ -107,9 +116,15 @@ pub fn export_to_path(service: &Service, path: &str, locale: &str) -> Result<Str
     if path.is_empty() {
         return Err(file_err(msg("settings.dataPath", &[], locale)));
     }
-    let text = service.export_json().map_err(|e| crate::drawer::error_message(&e, locale))?;
+    let text = service
+        .export_json()
+        .map_err(|e| crate::drawer::error_message(&e, locale))?;
     std::fs::write(path, text).map_err(|e| file_err(e.to_string()))?;
-    Ok(msg("settings.exported", &[("path", path.to_owned())], locale))
+    Ok(msg(
+        "settings.exported",
+        &[("path", path.to_owned())],
+        locale,
+    ))
 }
 
 /// Replace all data with the export file at `path`; `Ok` is a localised confirmation.
@@ -120,8 +135,14 @@ pub fn import_from_path(service: &Service, path: &str, locale: &str) -> Result<S
         return Err(file_err(msg("settings.dataPath", &[], locale)));
     }
     let text = std::fs::read_to_string(path).map_err(|e| file_err(e.to_string()))?;
-    let sum = service.import_json(&text).map_err(|e| crate::drawer::error_message(&e, locale))?;
-    Ok(msg("settings.imported", &[("tasks", sum.tasks.to_string())], locale))
+    let sum = service
+        .import_json(&text)
+        .map_err(|e| crate::drawer::error_message(&e, locale))?;
+    Ok(msg(
+        "settings.imported",
+        &[("tasks", sum.tasks.to_string())],
+        locale,
+    ))
 }
 
 #[cfg(test)]
@@ -132,7 +153,9 @@ mod tests {
     fn notify_time_parsing() {
         assert_eq!(parse_notify_time(" 7:05 ").as_deref(), Some("07:05"));
         assert_eq!(parse_notify_time("23:59").as_deref(), Some("23:59"));
-        for bad in ["", "24:00", "12:60", "1205", "ab:cd", "12:5", "-1:00", "123:00"] {
+        for bad in [
+            "", "24:00", "12:60", "1205", "ab:cd", "12:5", "-1:00", "123:00",
+        ] {
             assert_eq!(parse_notify_time(bad), None, "{bad}");
         }
     }
@@ -145,14 +168,21 @@ mod tests {
 
     #[test]
     fn headings_toggle() {
-        assert_eq!(group_heading_key(true, "myday.group.radar").as_deref(), Some("myday.group.radar"));
+        assert_eq!(
+            group_heading_key(true, "myday.group.radar").as_deref(),
+            Some("myday.group.radar")
+        );
         assert_eq!(group_heading_key(false, "myday.group.radar"), None);
     }
 
     #[test]
     fn every_settings_key_exists_in_all_locales() {
         for l in languages() {
-            for k in KEYS.iter().copied().chain(languages().iter().map(|_| "settings.language")) {
+            for k in KEYS
+                .iter()
+                .copied()
+                .chain(languages().iter().map(|_| "settings.language"))
+            {
                 let v = tr(k, &HashMap::new(), Some(l));
                 assert!(!v.is_empty() && v != k, "missing {k} in {l}");
             }
@@ -167,18 +197,30 @@ mod tests {
         use doene_service::NewTask;
         let mk = || Service::new(doene_storage::Storage::open_in_memory().unwrap());
         let (a, b) = (mk(), mk());
-        a.create_task(NewTask { subject: "x".into(), ..Default::default() }).unwrap();
+        a.create_task(NewTask {
+            subject: "x".into(),
+            ..Default::default()
+        })
+        .unwrap();
         let dir = std::env::temp_dir().join(format!("doene-exp-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let f = dir.join("e.json");
         let p = f.to_str().unwrap();
-        assert!(export_to_path(&a, p, "sv").unwrap().starts_with("Exporterat"));
+        assert!(
+            export_to_path(&a, p, "sv")
+                .unwrap()
+                .starts_with("Exporterat")
+        );
         assert_eq!(import_from_path(&b, p, "en").unwrap(), "Imported 1 tasks");
         assert_eq!(b.all_tasks().unwrap().len(), 1);
         std::fs::write(&f, "garbage").unwrap();
         assert_eq!(import_from_path(&b, p, "en").unwrap_err(), "invalid JSON");
         assert!(import_from_path(&b, "", "en").is_err());
-        assert!(import_from_path(&b, "/nonexistent/zz.json", "en").unwrap_err().starts_with("Cannot use file"));
+        assert!(
+            import_from_path(&b, "/nonexistent/zz.json", "en")
+                .unwrap_err()
+                .starts_with("Cannot use file")
+        );
         std::fs::remove_dir_all(dir).ok();
     }
 }

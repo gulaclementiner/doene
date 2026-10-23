@@ -10,11 +10,19 @@ use doene_storage::views::SavedView;
 use serde_json::{Value, json};
 
 fn status(s: TaskStatus) -> &'static str {
-    if s == TaskStatus::Completed { "completed" } else { "open" }
+    if s == TaskStatus::Completed {
+        "completed"
+    } else {
+        "open"
+    }
 }
 
 fn status_from(s: &str) -> TaskStatus {
-    if s == "completed" { TaskStatus::Completed } else { TaskStatus::Open }
+    if s == "completed" {
+        TaskStatus::Completed
+    } else {
+        TaskStatus::Open
+    }
 }
 
 pub fn task_json(h: &HydratedTask) -> Value {
@@ -47,7 +55,9 @@ fn opt_str(v: &Value, k: &str) -> Option<String> {
 }
 
 fn opt_date(v: &Value, k: &str) -> Option<Date> {
-    v.get(k).and_then(Value::as_str).and_then(|s| Date::parse(s).ok())
+    v.get(k)
+        .and_then(Value::as_str)
+        .and_then(|s| Date::parse(s).ok())
 }
 
 pub fn task_from_json(v: &Value) -> Option<HydratedTask> {
@@ -55,11 +65,21 @@ pub fn task_from_json(v: &Value) -> Option<HydratedTask> {
     let recurrence = v.get("recurrence").filter(|r| !r.is_null()).and_then(|r| {
         Some(RecurrenceRule {
             kind: RecurrenceType::from_token(r.get("type")?.as_str()?)?,
-            interval: r.get("interval").and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok()),
-            unit: r.get("unit").and_then(Value::as_str).and_then(RecurrenceUnit::from_token),
+            interval: r
+                .get("interval")
+                .and_then(Value::as_u64)
+                .and_then(|n| u32::try_from(n).ok()),
+            unit: r
+                .get("unit")
+                .and_then(Value::as_str)
+                .and_then(RecurrenceUnit::from_token),
             days: r.get("days").and_then(Value::as_array).map(|a| {
                 a.iter()
-                    .filter_map(|n| n.as_u64().and_then(|n| u8::try_from(n).ok()).and_then(Weekday::from_dow))
+                    .filter_map(|n| {
+                        n.as_u64()
+                            .and_then(|n| u8::try_from(n).ok())
+                            .and_then(Weekday::from_dow)
+                    })
                     .collect()
             }),
         })
@@ -88,7 +108,11 @@ pub fn task_from_json(v: &Value) -> Option<HydratedTask> {
     let tags = v
         .get("tags")
         .and_then(Value::as_array)
-        .map(|a| a.iter().filter_map(|t| t.as_str().and_then(|s| Tag::new(s).ok())).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|t| t.as_str().and_then(|s| Tag::new(s).ok()))
+                .collect()
+        })
         .unwrap_or_default();
     let steps = v
         .get("steps")
@@ -129,13 +153,21 @@ pub fn view_from_json(v: &Value) -> Option<SavedView> {
             id: opt_str(v, "id")?,
             name: opt_str(v, "name")?,
             emoji: opt_str(v, "emoji"),
-            match_mode: if v.get("match").and_then(Value::as_str) == Some("all") { MatchMode::All } else { MatchMode::Any },
+            match_mode: if v.get("match").and_then(Value::as_str) == Some("all") {
+                MatchMode::All
+            } else {
+                MatchMode::Any
+            },
             show_done: v.get("show_done").and_then(Value::as_bool).unwrap_or(false),
             position: v.get("position").and_then(Value::as_f64).unwrap_or(0.0),
             tags: v
                 .get("tags")
                 .and_then(Value::as_array)
-                .map(|a| a.iter().filter_map(|t| t.as_str().and_then(|s| Tag::new(s).ok())).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|t| t.as_str().and_then(|s| Tag::new(s).ok()))
+                        .collect()
+                })
                 .unwrap_or_default(),
         },
         sorts: v
@@ -146,7 +178,11 @@ pub fn view_from_json(v: &Value) -> Option<SavedView> {
                     .filter_map(|s| {
                         Some(SortLevel {
                             by: SortKey::from_token(s.get("by")?.as_str()?)?,
-                            dir: if s.get("dir").and_then(Value::as_str) == Some("desc") { SortDirection::Desc } else { SortDirection::Asc },
+                            dir: if s.get("dir").and_then(Value::as_str) == Some("desc") {
+                                SortDirection::Desc
+                            } else {
+                                SortDirection::Asc
+                            },
                         })
                     })
                     .collect()

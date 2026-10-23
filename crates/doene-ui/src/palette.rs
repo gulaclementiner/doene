@@ -53,15 +53,31 @@ fn matches(label: &str, q: &str) -> bool {
 
 /// Build the palette entries for `query`. `tasks` are the already-ranked
 /// search results for the same query. `dark` is the current effective theme.
-pub fn build_entries(query: &str, views: &[SavedView], tasks: &[HydratedTask], dark: bool, locale: &str) -> Vec<Entry> {
+pub fn build_entries(
+    query: &str,
+    views: &[SavedView],
+    tasks: &[HydratedTask],
+    dark: bool,
+    locale: &str,
+) -> Vec<Entry> {
     let q = query.trim().to_lowercase();
     let t = |k: &str| tr(k, &HashMap::new(), Some(locale));
-    let go = |name: String| tr("palette.goTo", &HashMap::from([("name".to_owned(), Some(name))]), Some(locale));
+    let go = |name: String| {
+        tr(
+            "palette.goTo",
+            &HashMap::from([("name".to_owned(), Some(name))]),
+            Some(locale),
+        )
+    };
     let mut out = vec![];
     for l in SMART {
         let name = t(nav_key(l));
         if matches(&name, &q) {
-            out.push(Entry { action: Action::OpenList(l), label: go(name), section: None });
+            out.push(Entry {
+                action: Action::OpenList(l),
+                label: go(name),
+                section: None,
+            });
         }
     }
     for v in views {
@@ -73,11 +89,23 @@ pub fn build_entries(query: &str, views: &[SavedView], tasks: &[HydratedTask], d
             });
         }
     }
-    let theme = if dark { (Command::ToggleTheme, "palette.lightMode") } else { (Command::ToggleTheme, "palette.darkMode") };
-    for (c, key) in [(Command::NewTask, "palette.newTask"), (Command::NewView, "palette.newView"), theme] {
+    let theme = if dark {
+        (Command::ToggleTheme, "palette.lightMode")
+    } else {
+        (Command::ToggleTheme, "palette.darkMode")
+    };
+    for (c, key) in [
+        (Command::NewTask, "palette.newTask"),
+        (Command::NewView, "palette.newView"),
+        theme,
+    ] {
         let label = t(key);
         if matches(&label, &q) {
-            out.push(Entry { action: Action::Run(c), label, section: Some("palette.commands") });
+            out.push(Entry {
+                action: Action::Run(c),
+                label,
+                section: Some("palette.commands"),
+            });
         }
     }
     if !q.is_empty() {
@@ -131,7 +159,10 @@ mod tests {
         assert_eq!(kinds(&e), vec![&Action::Run(Command::ToggleTheme)]);
         assert!(build_entries("light", &[], &[], false, "en").is_empty());
         let sv = build_entries("", &[], &[], false, "sv");
-        assert!(sv.iter().any(|x| x.label == tr("palette.darkMode", &HashMap::new(), Some("sv"))));
+        assert!(
+            sv.iter()
+                .any(|x| x.label == tr("palette.darkMode", &HashMap::new(), Some("sv")))
+        );
     }
 
     #[test]

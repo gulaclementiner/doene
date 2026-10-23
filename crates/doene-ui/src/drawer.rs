@@ -9,8 +9,16 @@ use doene_core::{Date, Importance, RecurrenceRule, TaskStatus};
 use doene_service::{Service, ServiceError, StepPatch, TaskPatch};
 
 /// Drawer sections in default order (ids match the `section.*` locale keys).
-pub const SECTIONS: [&str; 8] =
-    ["customize", "tags", "subtasks", "steps", "refs", "referencedBy", "notes", "completion"];
+pub const SECTIONS: [&str; 8] = [
+    "customize",
+    "tags",
+    "subtasks",
+    "steps",
+    "refs",
+    "referencedBy",
+    "notes",
+    "completion",
+];
 
 /// The pref scope holding a task's section order.
 pub fn pref_scope(task_id: &str) -> String {
@@ -20,7 +28,9 @@ pub fn pref_scope(task_id: &str) -> String {
 /// Parse a stored section order: unknown/duplicate ids dropped, missing ones
 /// appended in default order. Bad JSON yields the default order.
 pub fn parse_order(stored: Option<&str>) -> Vec<String> {
-    let saved: Vec<String> = stored.and_then(|s| serde_json::from_str(s).ok()).unwrap_or_default();
+    let saved: Vec<String> = stored
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default();
     let mut out: Vec<String> = vec![];
     for id in saved.iter().map(String::as_str).chain(SECTIONS) {
         if SECTIONS.contains(&id) && !out.iter().any(|o| o == id) {
@@ -47,7 +57,10 @@ pub fn move_section(
     if index < order.len() && to != index {
         let s = order.remove(index);
         order.insert(to, s);
-        service.set_pref(&pref_scope(task_id), &serde_json::to_string(&order).unwrap_or_default())?;
+        service.set_pref(
+            &pref_scope(task_id),
+            &serde_json::to_string(&order).unwrap_or_default(),
+        )?;
     }
     Ok(order)
 }
@@ -66,7 +79,12 @@ pub struct RecurrenceDraft {
 
 impl Default for RecurrenceDraft {
     fn default() -> Self {
-        Self { kind: None, interval: 1, unit: "week", days: vec![] }
+        Self {
+            kind: None,
+            interval: 1,
+            unit: "week",
+            days: vec![],
+        }
     }
 }
 
@@ -74,13 +92,32 @@ const UNITS: [&str; 4] = ["day", "week", "month", "year"];
 
 impl RecurrenceDraft {
     pub fn from_rule(rule: Option<&RecurrenceRule>) -> Self {
-        let Some(r) = rule else { return Self::default() };
+        let Some(r) = rule else {
+            return Self::default();
+        };
         let raw = RawRecurrence::from(r.clone());
-        let kind = TYPES.iter().copied().find(|t| Some(*t) == raw.kind.as_deref());
-        let unit = UNITS.iter().copied().find(|u| Some(*u) == raw.unit.as_deref()).unwrap_or("week");
-        let mut days: Vec<u8> = raw.days.unwrap_or_default().iter().filter_map(|d| d.parse().ok()).collect();
+        let kind = TYPES
+            .iter()
+            .copied()
+            .find(|t| Some(*t) == raw.kind.as_deref());
+        let unit = UNITS
+            .iter()
+            .copied()
+            .find(|u| Some(*u) == raw.unit.as_deref())
+            .unwrap_or("week");
+        let mut days: Vec<u8> = raw
+            .days
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|d| d.parse().ok())
+            .collect();
         days.sort_unstable();
-        Self { kind, interval: raw.interval.map_or(1, |i| i as u32), unit, days }
+        Self {
+            kind,
+            interval: raw.interval.map_or(1, |i| i as u32),
+            unit,
+            days,
+        }
     }
 
     /// Toggle a weekday in the custom set.
@@ -114,8 +151,11 @@ impl RecurrenceDraft {
 pub fn error_message(e: &ServiceError, locale: &str) -> String {
     match e {
         ServiceError::Coded(c) => {
-            let p: HashMap<String, Option<String>> =
-                c.params.iter().map(|(k, v)| ((*k).to_owned(), Some(v.clone()))).collect();
+            let p: HashMap<String, Option<String>> = c
+                .params
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), Some(v.clone())))
+                .collect();
             tr(c.code, &p, Some(locale))
         }
         other => other.to_string(),
@@ -140,30 +180,49 @@ fn valid_reminder(s: &str) -> Option<String> {
     let (d, t) = s.split_once('T')?;
     Date::parse(d).ok()?;
     let (h, m) = t.split_once(':')?;
-    let ok = h.len() == 2 && m.len() == 2 && h.parse::<u8>().is_ok_and(|h| h < 24) && m.parse::<u8>().is_ok_and(|m| m < 60);
+    let ok = h.len() == 2
+        && m.len() == 2
+        && h.parse::<u8>().is_ok_and(|h| h < 24)
+        && m.parse::<u8>().is_ok_and(|m| m < 60);
     ok.then_some(s)
 }
 
 /// Apply a field edit through the service; `Err` is a localised message.
-pub fn apply_edit(service: &Service, id: &str, edit: FieldEdit, locale: &str) -> Result<(), String> {
+pub fn apply_edit(
+    service: &Service,
+    id: &str,
+    edit: FieldEdit,
+    locale: &str,
+) -> Result<(), String> {
     let bad = |key: &str| tr(key, &HashMap::new(), Some(locale));
     let mut patch = TaskPatch::default();
     match edit {
         FieldEdit::Notes(s) => patch.body = Some(if s.trim().is_empty() { None } else { Some(s) }),
         FieldEdit::Due(s) if s.trim().is_empty() => patch.due_date = Some(None),
         FieldEdit::Due(s) => {
-            patch.due_date = Some(Some(Date::parse(s.trim()).map_err(|_| bad("error.invalidDate"))?))
+            patch.due_date = Some(Some(
+                Date::parse(s.trim()).map_err(|_| bad("error.invalidDate"))?,
+            ))
         }
         FieldEdit::Reminder(s) if s.trim().is_empty() => patch.reminder_at = Some(None),
         FieldEdit::Reminder(s) => {
-            patch.reminder_at = Some(Some(valid_reminder(&s).ok_or_else(|| bad("error.invalidReminder"))?))
+            patch.reminder_at = Some(Some(
+                valid_reminder(&s).ok_or_else(|| bad("error.invalidReminder"))?,
+            ))
         }
         FieldEdit::Important(on) => {
-            patch.importance = Some(if on { Importance::High } else { Importance::Normal })
+            patch.importance = Some(if on {
+                Importance::High
+            } else {
+                Importance::Normal
+            })
         }
         FieldEdit::Recurrence(d) => patch.recurrence = Some(d.to_raw()),
     }
-    service.update_task(id, patch).map(|_| ()).map_err(|e| error_message(&e, locale))
+    service
+        .update_task(id, patch)
+        .map(|_| ())
+        .map_err(|e| error_message(&e, locale))
 }
 
 /// One step action from the drawer.
@@ -178,13 +237,30 @@ pub enum StepEdit {
 }
 
 /// Apply a step action to `task_id`; `Err` is a localised message.
-pub fn apply_step(service: &Service, task_id: &str, edit: StepEdit, locale: &str) -> Result<(), String> {
+pub fn apply_step(
+    service: &Service,
+    task_id: &str,
+    edit: StepEdit,
+    locale: &str,
+) -> Result<(), String> {
     let r = match edit {
         StepEdit::Add(s) => service.create_step(task_id, &s).map(|_| ()),
         StepEdit::Toggle(id) => service.task(task_id).and_then(|h| {
             let cur = h.steps.iter().find(|s| s.id == id).map(|s| s.status);
-            let next = if cur == Some(TaskStatus::Completed) { TaskStatus::Open } else { TaskStatus::Completed };
-            service.update_step(&id, StepPatch { status: Some(next), ..Default::default() }).map(|_| ())
+            let next = if cur == Some(TaskStatus::Completed) {
+                TaskStatus::Open
+            } else {
+                TaskStatus::Completed
+            };
+            service
+                .update_step(
+                    &id,
+                    StepPatch {
+                        status: Some(next),
+                        ..Default::default()
+                    },
+                )
+                .map(|_| ())
         }),
         StepEdit::Delete(id) => service.delete_step(&id),
         StepEdit::Promote(id) => service.step_to_task(&id).map(|_| ()),
@@ -202,7 +278,10 @@ pub enum TagEdit {
 
 /// The task's tags without `#`, sorted.
 pub fn tag_names(service: &Service, task_id: &str) -> Vec<String> {
-    service.task(task_id).map(|h| h.tags.iter().map(|t| t.as_str().to_owned()).collect()).unwrap_or_default()
+    service
+        .task(task_id)
+        .map(|h| h.tags.iter().map(|t| t.as_str().to_owned()).collect())
+        .unwrap_or_default()
 }
 
 /// Tags in use on any task and not yet on `task_id`, for the add-tag suggestions.
@@ -221,14 +300,25 @@ pub fn tag_suggestions(service: &Service, task_id: &str) -> Vec<String> {
 }
 
 /// Apply a tag action through the service (logged, undoable via update).
-pub fn apply_tag(service: &Service, task_id: &str, edit: TagEdit, locale: &str) -> Result<(), String> {
+pub fn apply_tag(
+    service: &Service,
+    task_id: &str,
+    edit: TagEdit,
+    locale: &str,
+) -> Result<(), String> {
     let mut tags = tag_names(service, task_id);
     match edit {
         TagEdit::Add(raw) => tags.push(raw),
         TagEdit::Remove(t) => tags.retain(|x| *x != t),
     }
-    let patch = TaskPatch { tags: Some(tags), ..Default::default() };
-    service.update_task(task_id, patch).map(|_| ()).map_err(|e| error_message(&e, locale))
+    let patch = TaskPatch {
+        tags: Some(tags),
+        ..Default::default()
+    };
+    service
+        .update_task(task_id, patch)
+        .map(|_| ())
+        .map_err(|e| error_message(&e, locale))
 }
 
 /// A step as shown in the drawer.
@@ -246,7 +336,11 @@ pub fn step_rows(service: &Service, task_id: &str) -> Vec<StepRow> {
         .map(|h| {
             h.steps
                 .into_iter()
-                .map(|s| StepRow { done: s.status == TaskStatus::Completed, id: s.id, subject: s.subject })
+                .map(|s| StepRow {
+                    done: s.status == TaskStatus::Completed,
+                    id: s.id,
+                    subject: s.subject,
+                })
                 .collect()
         })
         .unwrap_or_default()
@@ -299,7 +393,12 @@ pub fn subtask_tree(service: &Service, task_id: &str) -> Vec<SubtaskNode> {
 }
 
 /// Create a full task under `task_id` (quick subtask add).
-pub fn add_subtask(service: &Service, task_id: &str, subject: &str, locale: &str) -> Result<(), String> {
+pub fn add_subtask(
+    service: &Service,
+    task_id: &str,
+    subject: &str,
+    locale: &str,
+) -> Result<(), String> {
     service
         .create_task(doene_service::NewTask {
             subject: subject.to_owned(),
@@ -312,12 +411,24 @@ pub fn add_subtask(service: &Service, task_id: &str, subject: &str, locale: &str
 
 /// Nest `child` as the last subtask of `parent` (`None` = top level); a cycle
 /// or self-nesting is rejected with a localised message and nothing changes.
-pub fn nest_task(service: &Service, child: &str, parent: Option<&str>, locale: &str) -> Result<(), String> {
+pub fn nest_task(
+    service: &Service,
+    child: &str,
+    parent: Option<&str>,
+    locale: &str,
+) -> Result<(), String> {
     let at = service
         .all_tasks()
-        .map(|a| a.iter().filter(|h| h.task.parent_id.as_deref() == parent && h.task.id != child).count())
+        .map(|a| {
+            a.iter()
+                .filter(|h| h.task.parent_id.as_deref() == parent && h.task.id != child)
+                .count()
+        })
         .unwrap_or(0);
-    service.place_task(child, parent, at).map(|_| ()).map_err(|e| error_message(&e, locale))
+    service
+        .place_task(child, parent, at)
+        .map(|_| ())
+        .map_err(|e| error_message(&e, locale))
 }
 
 /// One activity line: local-ish timestamp, action, detail.
@@ -351,7 +462,10 @@ mod tests {
     fn svc() -> (Service, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let storage = Storage::open(&dir.path().join("d.db")).unwrap();
-        (Service::with_clock(storage, Box::new(|| "2025-03-10T09:00:00.000Z".into())), dir)
+        (
+            Service::with_clock(storage, Box::new(|| "2025-03-10T09:00:00.000Z".into())),
+            dir,
+        )
     }
 
     fn task(s: &Service) -> String {
@@ -382,7 +496,13 @@ mod tests {
         let id = task(&s);
         apply_edit(&s, &id, FieldEdit::Notes("hello".into()), "en").unwrap();
         apply_edit(&s, &id, FieldEdit::Due("2025-04-01".into()), "en").unwrap();
-        apply_edit(&s, &id, FieldEdit::Reminder("2025-04-01 08:30".into()), "en").unwrap();
+        apply_edit(
+            &s,
+            &id,
+            FieldEdit::Reminder("2025-04-01 08:30".into()),
+            "en",
+        )
+        .unwrap();
         apply_edit(&s, &id, FieldEdit::Important(true), "en").unwrap();
         let t = s.task(&id).unwrap().task;
         assert_eq!(t.body.as_deref(), Some("hello"));
@@ -400,7 +520,10 @@ mod tests {
     fn invalid_input_gives_localised_error_and_changes_nothing() {
         let (s, _d) = svc();
         let id = task(&s);
-        assert_eq!(apply_edit(&s, &id, FieldEdit::Due("2025-02-30".into()), "en").unwrap_err(), "invalid date (use YYYY-MM-DD)");
+        assert_eq!(
+            apply_edit(&s, &id, FieldEdit::Due("2025-02-30".into()), "en").unwrap_err(),
+            "invalid date (use YYYY-MM-DD)"
+        );
         assert_eq!(
             apply_edit(&s, &id, FieldEdit::Reminder("tomorrow".into()), "sv").unwrap_err(),
             "ogiltig påminnelse (använd ÅÅÅÅ-MM-DD HH:MM)"
@@ -422,27 +545,55 @@ mod tests {
         let (s, _d) = svc();
         let id = task(&s);
         for kind in ["daily", "weekdays", "weekly", "monthly", "yearly"] {
-            let d = RecurrenceDraft { kind: TYPES.iter().copied().find(|t| *t == kind), ..Default::default() };
+            let d = RecurrenceDraft {
+                kind: TYPES.iter().copied().find(|t| *t == kind),
+                ..Default::default()
+            };
             apply_edit(&s, &id, FieldEdit::Recurrence(d.clone()), "en").unwrap();
             let got = s.task(&id).unwrap().task.recurrence;
-            assert_eq!(RecurrenceDraft::from_rule(got.as_ref()).kind, Some(d.kind.unwrap()));
+            assert_eq!(
+                RecurrenceDraft::from_rule(got.as_ref()).kind,
+                Some(d.kind.unwrap())
+            );
         }
         // custom: every 2 weeks on Mon + Fri
-        let mut d = RecurrenceDraft { kind: Some("custom"), interval: 2, unit: "week", days: vec![] };
+        let mut d = RecurrenceDraft {
+            kind: Some("custom"),
+            interval: 2,
+            unit: "week",
+            days: vec![],
+        };
         d.toggle_day(5);
         d.toggle_day(1);
         d.toggle_day(3);
         d.toggle_day(3);
         apply_edit(&s, &id, FieldEdit::Recurrence(d.clone()), "en").unwrap();
         let got = s.task(&id).unwrap().task.recurrence;
-        assert_eq!(RecurrenceDraft::from_rule(got.as_ref()), RecurrenceDraft { days: vec![1, 5], ..d });
+        assert_eq!(
+            RecurrenceDraft::from_rule(got.as_ref()),
+            RecurrenceDraft {
+                days: vec![1, 5],
+                ..d
+            }
+        );
         // custom monthly interval drops weekdays
-        let m = RecurrenceDraft { kind: Some("custom"), interval: 3, unit: "month", days: vec![2] };
+        let m = RecurrenceDraft {
+            kind: Some("custom"),
+            interval: 3,
+            unit: "month",
+            days: vec![2],
+        };
         apply_edit(&s, &id, FieldEdit::Recurrence(m), "en").unwrap();
         let got = RecurrenceDraft::from_rule(s.task(&id).unwrap().task.recurrence.as_ref());
         assert_eq!((got.interval, got.unit, got.days.len()), (3, "month", 0));
         // none clears
-        apply_edit(&s, &id, FieldEdit::Recurrence(RecurrenceDraft::default()), "en").unwrap();
+        apply_edit(
+            &s,
+            &id,
+            FieldEdit::Recurrence(RecurrenceDraft::default()),
+            "en",
+        )
+        .unwrap();
         assert_eq!(s.task(&id).unwrap().task.recurrence, None);
     }
 
@@ -454,7 +605,11 @@ mod tests {
         let lines = activity_lines(&s, &id);
         assert!(lines.len() >= 2);
         assert_eq!(lines.last().unwrap().action, "created");
-        assert!(lines.iter().any(|l| l.action == "due_date changed" && l.at == "2025-03-10 09:00"));
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.action == "due_date changed" && l.at == "2025-03-10 09:00")
+        );
     }
 
     #[test]
@@ -486,9 +641,15 @@ mod tests {
         for n in ["a", "b", "c"] {
             apply_step(&s, &id, StepEdit::Add(n.into()), "en").unwrap();
         }
-        assert_eq!(apply_step(&s, &id, StepEdit::Add(" ".into()), "en").unwrap_err(), "subject required");
+        assert_eq!(
+            apply_step(&s, &id, StepEdit::Add(" ".into()), "en").unwrap_err(),
+            "subject required"
+        );
         let rows = step_rows(&s, &id);
-        assert_eq!(rows.iter().map(|r| r.subject.as_str()).collect::<Vec<_>>(), ["a", "b", "c"]);
+        assert_eq!(
+            rows.iter().map(|r| r.subject.as_str()).collect::<Vec<_>>(),
+            ["a", "b", "c"]
+        );
         apply_step(&s, &id, StepEdit::Toggle(rows[0].id.clone()), "en").unwrap();
         assert!(step_rows(&s, &id)[0].done);
         apply_step(&s, &id, StepEdit::Toggle(rows[0].id.clone()), "en").unwrap();
@@ -496,7 +657,12 @@ mod tests {
         apply_step(&s, &id, StepEdit::Delete(rows[1].id.clone()), "en").unwrap();
         apply_step(&s, &id, StepEdit::Promote(rows[2].id.clone()), "en").unwrap();
         assert_eq!(step_rows(&s, &id).len(), 1);
-        let kids: Vec<_> = s.all_tasks().unwrap().into_iter().filter(|t| t.task.parent_id.as_deref() == Some(&id)).collect();
+        let kids: Vec<_> = s
+            .all_tasks()
+            .unwrap()
+            .into_iter()
+            .filter(|t| t.task.parent_id.as_deref() == Some(&id))
+            .collect();
         assert_eq!(kids.len(), 1);
         assert_eq!(kids[0].task.subject, "c");
         s.undo().unwrap();
@@ -511,12 +677,28 @@ mod tests {
         let b = subtask_tree(&s, &a)[0].id.clone();
         add_subtask(&s, &b, "c", "en").unwrap();
         add_subtask(&s, &a, "d", "en").unwrap();
-        let tree: Vec<_> = subtask_tree(&s, &a).into_iter().map(|n| (n.subject, n.depth)).collect();
-        assert_eq!(tree, [("b".to_owned(), 0), ("c".to_owned(), 1), ("d".to_owned(), 0)]);
+        let tree: Vec<_> = subtask_tree(&s, &a)
+            .into_iter()
+            .map(|n| (n.subject, n.depth))
+            .collect();
+        assert_eq!(
+            tree,
+            [
+                ("b".to_owned(), 0),
+                ("c".to_owned(), 1),
+                ("d".to_owned(), 0)
+            ]
+        );
         // cycle: a under its own grandchild; and self
         let c = subtask_tree(&s, &a)[1].id.clone();
-        assert_eq!(nest_task(&s, &a, Some(&c), "en").unwrap_err(), "subtasks cannot form a cycle");
-        assert_eq!(nest_task(&s, &b, Some(&b), "sv").unwrap_err(), "en uppgift kan inte vara sin egen deluppgift");
+        assert_eq!(
+            nest_task(&s, &a, Some(&c), "en").unwrap_err(),
+            "subtasks cannot form a cycle"
+        );
+        assert_eq!(
+            nest_task(&s, &b, Some(&b), "sv").unwrap_err(),
+            "en uppgift kan inte vara sin egen deluppgift"
+        );
         assert_eq!(subtask_tree(&s, &a).len(), 3);
         // un-nest c to top level
         nest_task(&s, &c, None, "en").unwrap();

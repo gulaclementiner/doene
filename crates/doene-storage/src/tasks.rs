@@ -71,20 +71,22 @@ fn recurrence_days_from(text: Option<String>) -> Option<Vec<Weekday>> {
 
 fn task_from_row(r: &Row<'_>) -> rusqlite::Result<Task> {
     let kind: Option<String> = r.get("recurrence_type")?;
-    let recurrence = kind.and_then(|k| RecurrenceType::from_token(&k)).map(|kind| RecurrenceRule {
-        kind,
-        interval: r
-            .get::<_, Option<i64>>("recurrence_interval")
-            .ok()
-            .flatten()
-            .and_then(|n| u32::try_from(n).ok()),
-        unit: r
-            .get::<_, Option<String>>("recurrence_unit")
-            .ok()
-            .flatten()
-            .and_then(|u| RecurrenceUnit::from_token(&u)),
-        days: recurrence_days_from(r.get("recurrence_days").ok().flatten()),
-    });
+    let recurrence = kind
+        .and_then(|k| RecurrenceType::from_token(&k))
+        .map(|kind| RecurrenceRule {
+            kind,
+            interval: r
+                .get::<_, Option<i64>>("recurrence_interval")
+                .ok()
+                .flatten()
+                .and_then(|n| u32::try_from(n).ok()),
+            unit: r
+                .get::<_, Option<String>>("recurrence_unit")
+                .ok()
+                .flatten()
+                .and_then(|u| RecurrenceUnit::from_token(&u)),
+            days: recurrence_days_from(r.get("recurrence_days").ok().flatten()),
+        });
     Ok(Task {
         id: r.get("id")?,
         subject: r.get("subject")?,
@@ -200,7 +202,13 @@ pub fn set_tags(conn: &Connection, task_id: &str, tags: &[Tag]) -> rusqlite::Res
 pub fn insert_step(conn: &Connection, s: &Step) -> rusqlite::Result<()> {
     conn.execute(
         "INSERT INTO steps (id, task_id, subject, status, position) VALUES (?1,?2,?3,?4,?5)",
-        params![s.id, s.task_id, s.subject, status_token(s.status), s.position],
+        params![
+            s.id,
+            s.task_id,
+            s.subject,
+            status_token(s.status),
+            s.position
+        ],
     )?;
     Ok(())
 }
@@ -287,17 +295,18 @@ pub fn hydrated(conn: &Connection, id: &str) -> rusqlite::Result<Option<Hydrated
 
 /// Direct children of `parent` (`None` = top level) as `(id, position)`, by position then id.
 pub fn siblings(conn: &Connection, parent: Option<&str>) -> rusqlite::Result<Vec<(String, f64)>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, position FROM tasks WHERE parent_id IS ?1 ORDER BY position, id",
-    )?;
-    stmt.query_map(params![parent], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()
+    let mut stmt =
+        conn.prepare("SELECT id, position FROM tasks WHERE parent_id IS ?1 ORDER BY position, id")?;
+    stmt.query_map(params![parent], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect()
 }
 
 /// Every descendant id of a task, breadth-first (parents before children).
 pub fn descendants(conn: &Connection, id: &str) -> rusqlite::Result<Vec<String>> {
     let mut out = Vec::new();
     let mut frontier = vec![id.to_owned()];
-    let mut stmt = conn.prepare("SELECT id FROM tasks WHERE parent_id = ?1 ORDER BY position, id")?;
+    let mut stmt =
+        conn.prepare("SELECT id FROM tasks WHERE parent_id = ?1 ORDER BY position, id")?;
     while !frontier.is_empty() {
         let mut next = Vec::new();
         for f in &frontier {
@@ -313,9 +322,12 @@ pub fn descendants(conn: &Connection, id: &str) -> rusqlite::Result<Vec<String>>
 }
 
 /// Id -> parent id for every task (feeds the core tree guards).
-pub fn parent_map(conn: &Connection) -> rusqlite::Result<std::collections::HashMap<String, Option<String>>> {
+pub fn parent_map(
+    conn: &Connection,
+) -> rusqlite::Result<std::collections::HashMap<String, Option<String>>> {
     let mut stmt = conn.prepare("SELECT id, parent_id FROM tasks")?;
-    stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()
+    stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect()
 }
 
 /// One step by id.
@@ -352,7 +364,10 @@ pub fn delete_step(conn: &Connection, id: &str) -> rusqlite::Result<()> {
 }
 
 /// Smallest and largest position among a task's steps.
-pub fn step_position_bounds(conn: &Connection, task_id: &str) -> rusqlite::Result<(Option<f64>, Option<f64>)> {
+pub fn step_position_bounds(
+    conn: &Connection,
+    task_id: &str,
+) -> rusqlite::Result<(Option<f64>, Option<f64>)> {
     conn.query_row(
         "SELECT MIN(position), MAX(position) FROM steps WHERE task_id = ?1",
         params![task_id],

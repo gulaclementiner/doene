@@ -5,7 +5,9 @@ use std::collections::HashMap;
 
 use doene_core::i18n::tr;
 use doene_core::view_rules::{ViewRules, normalise_view, sort_tasks, view_matches};
-use doene_core::{Date, HydratedTask, MAX_SORTS, MatchMode, RawSortLevel, RawView, SortDirection, SortKey};
+use doene_core::{
+    Date, HydratedTask, MAX_SORTS, MatchMode, RawSortLevel, RawView, SortDirection, SortKey,
+};
 use doene_service::{SavedView, Service, ServiceError};
 
 use crate::drawer::error_message;
@@ -26,7 +28,9 @@ pub const PALETTE: [[u8; 3]; 8] = [
 
 /// The view's rail colour: stable for an id, spread over the palette.
 pub fn view_color(id: &str) -> [u8; 3] {
-    let h = id.bytes().fold(5381u32, |h, b| h.wrapping_mul(33) ^ u32::from(b));
+    let h = id
+        .bytes()
+        .fold(5381u32, |h, b| h.wrapping_mul(33) ^ u32::from(b));
     PALETTE[(h as usize) % PALETTE.len()]
 }
 
@@ -46,7 +50,12 @@ pub fn rail_rows(views: &[SavedView]) -> Vec<ViewRailRow> {
         .iter()
         .map(|v| ViewRailRow {
             id: v.view.id.clone(),
-            icon: v.view.emoji.clone().filter(|e| !e.trim().is_empty()).unwrap_or_else(|| "●".into()),
+            icon: v
+                .view
+                .emoji
+                .clone()
+                .filter(|e| !e.trim().is_empty())
+                .unwrap_or_else(|| "●".into()),
             name: v.view.name.clone(),
             color: view_color(&v.view.id),
         })
@@ -54,18 +63,35 @@ pub fn rail_rows(views: &[SavedView]) -> Vec<ViewRailRow> {
 }
 
 /// The rows a view shows: its tag/show-done rule, sorted per its levels.
-pub fn view_rows(view: &SavedView, tasks: &[HydratedTask], today: Date, locale: &str) -> Vec<TaskRow> {
+pub fn view_rows(
+    view: &SavedView,
+    tasks: &[HydratedTask],
+    today: Date,
+    locale: &str,
+) -> Vec<TaskRow> {
     let rules = ViewRules {
         name: view.view.name.clone(),
         emoji: view.view.emoji.clone(),
-        tags: view.view.tags.iter().map(|t| t.as_str().to_owned()).collect(),
+        tags: view
+            .view
+            .tags
+            .iter()
+            .map(|t| t.as_str().to_owned())
+            .collect(),
         match_mode: view.view.match_mode,
         sorts: view.sorts.clone(),
         show_done: view.view.show_done,
     };
-    let matched: Vec<HydratedTask> = tasks.iter().filter(|t| view_matches(&rules, t)).cloned().collect();
+    let matched: Vec<HydratedTask> = tasks
+        .iter()
+        .filter(|t| view_matches(&rules, t))
+        .cloned()
+        .collect();
     let today_s = today.to_string();
-    sort_tasks(&matched, &view.sorts).into_iter().map(|h| task_row(h, today, &today_s, locale)).collect()
+    sort_tasks(&matched, &view.sorts)
+        .into_iter()
+        .map(|h| task_row(h, today, &today_s, locale))
+        .collect()
 }
 
 /// One sort level in the form.
@@ -123,7 +149,14 @@ impl ViewDraft {
             tags: v.view.tags.iter().map(|t| t.as_str().to_owned()).collect(),
             new_tag: String::new(),
             all: v.view.match_mode == MatchMode::All,
-            sorts: v.sorts.iter().map(|s| SortDraft { by: s.by, desc: s.dir == SortDirection::Desc }).collect(),
+            sorts: v
+                .sorts
+                .iter()
+                .map(|s| SortDraft {
+                    by: s.by,
+                    desc: s.dir == SortDirection::Desc,
+                })
+                .collect(),
             show_done: v.view.show_done,
         }
     }
@@ -133,7 +166,10 @@ impl ViewDraft {
         if self.sorts.len() >= MAX_SORTS {
             return false;
         }
-        self.sorts.push(SortDraft { by: SortKey::Name, desc: false });
+        self.sorts.push(SortDraft {
+            by: SortKey::Name,
+            desc: false,
+        });
         true
     }
 
@@ -146,7 +182,13 @@ impl ViewDraft {
 
     /// Commit the tag input buffer as a tag (`#` stripped, deduped, no spaces).
     pub fn commit_tag(&mut self) {
-        let t = self.new_tag.trim().trim_start_matches('#').trim().to_lowercase().replace(char::is_whitespace, "-");
+        let t = self
+            .new_tag
+            .trim()
+            .trim_start_matches('#')
+            .trim()
+            .to_lowercase()
+            .replace(char::is_whitespace, "-");
         self.new_tag.clear();
         if !t.is_empty() && !self.tags.contains(&t) {
             self.tags.push(t);
@@ -180,7 +222,9 @@ impl ViewDraft {
 
     /// Client-side validation, same rules as the service (core `normalise_view`).
     pub fn validate(&self, locale: &str) -> Result<(), String> {
-        normalise_view(&self.to_raw()).map(|_| ()).map_err(|e| error_message(&ServiceError::Coded(e), locale))
+        normalise_view(&self.to_raw())
+            .map(|_| ())
+            .map_err(|e| error_message(&ServiceError::Coded(e), locale))
     }
 
     /// Save: create or update via the service. Returns the saved view's id.
@@ -202,14 +246,33 @@ impl Default for ViewDraft {
 /// Localised one-line summary of a draft ("Tagged #a or #b, by Name, then Due").
 pub fn describe(draft: &ViewDraft, locale: &str) -> String {
     let t = |k: &str, p: &[(&str, String)]| {
-        let m: HashMap<String, Option<String>> = p.iter().map(|(k, v)| ((*k).to_owned(), Some(v.clone()))).collect();
+        let m: HashMap<String, Option<String>> = p
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), Some(v.clone())))
+            .collect();
         tr(k, &m, Some(locale))
     };
     let mut out = if draft.tags.is_empty() {
         t("viewForm.describeEveryTask", &[])
     } else {
-        let sep = format!(" {} ", t(if draft.all { "viewForm.all" } else { "viewForm.describeOr" }, &[]).to_lowercase());
-        let tags = draft.tags.iter().map(|g| format!("#{g}")).collect::<Vec<_>>().join(&sep);
+        let sep = format!(
+            " {} ",
+            t(
+                if draft.all {
+                    "viewForm.all"
+                } else {
+                    "viewForm.describeOr"
+                },
+                &[]
+            )
+            .to_lowercase()
+        );
+        let tags = draft
+            .tags
+            .iter()
+            .map(|g| format!("#{g}"))
+            .collect::<Vec<_>>()
+            .join(&sep);
         t("viewForm.describeTagged", &[("tags", tags)])
     };
     if !draft.sorts.is_empty() {

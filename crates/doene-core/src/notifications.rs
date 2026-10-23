@@ -60,13 +60,21 @@ pub fn due_notifications(
                 && now - rm <= GRACE_MINUTES
                 && !fired.contains(&key)
             {
-                out.push(Notification { key, title: t.subject.clone(), body: tr("notify.reminder", &none, Some(locale)) });
+                out.push(Notification {
+                    key,
+                    title: t.subject.clone(),
+                    body: tr("notify.reminder", &none, Some(locale)),
+                });
             }
         }
         if time_reached && t.due_date.is_some_and(|d| d.to_string() == day) {
             let key = format!("d:{}:{day}", t.id);
             if !fired.contains(&key) {
-                out.push(Notification { key, title: t.subject.clone(), body: tr("notify.dueToday", &none, Some(locale)) });
+                out.push(Notification {
+                    key,
+                    title: t.subject.clone(),
+                    body: tr("notify.dueToday", &none, Some(locale)),
+                });
             }
         }
     }
@@ -82,7 +90,11 @@ mod tests {
         HydratedTask::bare(Task {
             id: id.into(),
             subject: format!("S{id}"),
-            status: if done { TaskStatus::Completed } else { TaskStatus::Open },
+            status: if done {
+                TaskStatus::Completed
+            } else {
+                TaskStatus::Open
+            },
             importance: Importance::Normal,
             due_date: due.map(|d| Date::parse(d).unwrap()),
             reminder_at: rem.map(Into::into),
@@ -99,7 +111,10 @@ mod tests {
     }
     fn run(tasks: &[HydratedTask], now: &str, fired: &[&str]) -> Vec<String> {
         let f = fired.iter().map(|s| s.to_string()).collect();
-        due_notifications(tasks, now, &f, "09:00", "en").into_iter().map(|n| n.key).collect()
+        due_notifications(tasks, now, &f, "09:00", "en")
+            .into_iter()
+            .map(|n| n.key)
+            .collect()
     }
 
     #[test]
@@ -124,10 +139,18 @@ mod tests {
 
     #[test]
     fn completed_tasks_never_fire_and_bodies_are_localised() {
-        let t = [task("a", Some("2025-03-10"), Some("2025-03-10T08:00"), true)];
+        let t = [task(
+            "a",
+            Some("2025-03-10"),
+            Some("2025-03-10T08:00"),
+            true,
+        )];
         assert!(run(&t, "2025-03-10T10:00", &[]).is_empty());
         let t = [task("a", Some("2025-03-10"), None, false)];
         let n = due_notifications(&t, "2025-03-10T10:00", &Default::default(), "09:00", "sv");
-        assert_eq!((n[0].title.as_str(), n[0].body.as_str()), ("Sa", "Förfaller idag"));
+        assert_eq!(
+            (n[0].title.as_str(), n[0].body.as_str()),
+            ("Sa", "Förfaller idag")
+        );
     }
 }

@@ -3,8 +3,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use doene_core::quickadd::{QuickAddOptions, QuickAddView, quick_add};
 use doene_core::recurrence::{RawRecurrence, next_on_or_after, validate};
 use doene_core::{
-    CodedError, Date, RawView, View, ViewRules, normalise_view, FocusMode, HydratedTask, Importance, Step, Tag, Task, TaskStatus, TrashKind,
-    nlp::ImportanceLevel, search_tasks, tree,
+    CodedError, Date, FocusMode, HydratedTask, Importance, RawView, Step, Tag, Task, TaskStatus,
+    TrashKind, View, ViewRules, nlp::ImportanceLevel, normalise_view, search_tasks, tree,
 };
 use doene_storage::aux::{self, ActivityRow, TrashRow};
 use doene_storage::views::{self, SavedView};
@@ -199,9 +199,16 @@ struct UndoEntry {
 }
 
 fn system_now() -> String {
-    let d = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let d = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
     let secs = d.as_secs();
-    let date = Date { year: 1970, month: 1, day: 1 }.add_days((secs / 86_400) as i64);
+    let date = Date {
+        year: 1970,
+        month: 1,
+        day: 1,
+    }
+    .add_days((secs / 86_400) as i64);
     let rem = secs % 86_400;
     format!(
         "{date}T{:02}:{:02}:{:02}.{:03}Z",
@@ -253,7 +260,13 @@ fn tag_list(tags: &[Tag]) -> String {
     }
 }
 
-fn log(conn: &Connection, ctx: &Ctx, task: Option<&str>, action: &str, detail: Option<&str>) -> Res<()> {
+fn log(
+    conn: &Connection,
+    ctx: &Ctx,
+    task: Option<&str>,
+    action: &str,
+    detail: Option<&str>,
+) -> Res<()> {
     aux::insert_activity(conn, &new_id(), task, &ctx.now, action, detail)?;
     Ok(())
 }
@@ -269,13 +282,20 @@ fn settings_in(conn: &Connection) -> Res<Settings> {
         week_start: get("weekStart")?
             .and_then(|v| v.as_u64())
             .filter(|n| *n <= 1)
-            .map_or_else(|| doene_core::i18n::week_start(Some(&language)), |n| n as u8),
+            .map_or_else(
+                || doene_core::i18n::week_start(Some(&language)),
+                |n| n as u8,
+            ),
         due_notify_time: get("dueNotifyTime")?
             .and_then(|v| v.as_str().map(str::to_owned))
             .unwrap_or_else(|| doene_core::notifications::DEFAULT_DUE_NOTIFY_TIME.into()),
-        show_my_day_headings: get("showMyDayGroupHeadings")?.and_then(|v| v.as_bool()).unwrap_or(true),
+        show_my_day_headings: get("showMyDayGroupHeadings")?
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true),
         language_chosen: get("language")?.is_some(),
-        add_tasks_to_top: get("addTasksToTop")?.and_then(|v| v.as_bool()).unwrap_or(false),
+        add_tasks_to_top: get("addTasksToTop")?
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
         focus_mode: match get("focusMode")?.as_ref().and_then(Value::as_str) {
             Some("durable") => FocusMode::Durable,
             _ => FocusMode::Daily,
@@ -295,7 +315,10 @@ fn need(conn: &Connection, id: &str) -> Res<HydratedTask> {
 fn check_parent(conn: &Connection, task_id: Option<&str>, parent: Option<&str>) -> Res<()> {
     let Some(parent) = parent else { return Ok(()) };
     if Some(parent) == task_id {
-        return Err(coded("error.ownSubtask", "a task cannot be its own subtask"));
+        return Err(coded(
+            "error.ownSubtask",
+            "a task cannot be its own subtask",
+        ));
     }
     if tasks::task(conn, parent)?.is_none() {
         return Err(not_found("what.parentTask", "parent task"));
@@ -310,7 +333,11 @@ fn check_parent(conn: &Connection, task_id: Option<&str>, parent: Option<&str>) 
 
 fn importance_of(level: ImportanceLevel) -> Importance {
     // The schema stores only normal/high; the parser's `!low` has no stored form.
-    if level == ImportanceLevel::High { Importance::High } else { Importance::Normal }
+    if level == ImportanceLevel::High {
+        Importance::High
+    } else {
+        Importance::Normal
+    }
 }
 
 fn set_tags_logged(conn: &Connection, ctx: &Ctx, id: &str, raw: &[String]) -> Res<()> {
@@ -320,7 +347,13 @@ fn set_tags_logged(conn: &Connection, ctx: &Ctx, id: &str, raw: &[String]) -> Re
         return Ok(());
     }
     tasks::set_tags(conn, id, &next)?;
-    log(conn, ctx, Some(id), "tags changed", Some(&format!("{} -> {}", tag_list(&before), tag_list(&next))))
+    log(
+        conn,
+        ctx,
+        Some(id),
+        "tags changed",
+        Some(&format!("{} -> {}", tag_list(&before), tag_list(&next))),
+    )
 }
 
 fn edge_position(conn: &Connection, parent: Option<&str>, top: bool) -> Res<f64> {
@@ -338,7 +371,11 @@ fn create_in(conn: &Connection, ctx: &Ctx, n: NewTask) -> Res<HydratedTask> {
     }
     check_parent(conn, None, n.parent_id.as_deref())?;
     let recurrence = validate(n.recurrence.as_ref())?;
-    let due_date = if recurrence.is_some() { n.due_date.or(Some(ctx.today)) } else { n.due_date };
+    let due_date = if recurrence.is_some() {
+        n.due_date.or(Some(ctx.today))
+    } else {
+        n.due_date
+    };
     let top = settings_in(conn)?.add_tasks_to_top;
     let id = new_id();
     let task = Task {
@@ -377,67 +414,77 @@ fn set_focus(conn: &Connection, id: &str, date: Option<Date>) -> Res<()> {
 }
 
 fn token(s: TaskStatus) -> &'static str {
-    if s == TaskStatus::Completed { "completed" } else { "open" }
+    if s == TaskStatus::Completed {
+        "completed"
+    } else {
+        "open"
+    }
 }
 
 /// Validate one setting key/value (shared by `set_setting` and import).
 fn check_setting(key: &str, value: &Value) -> Res<()> {
-        match key {
-            "language" if !matches!(value.as_str(), Some(l) if doene_core::i18n::locales().contains(&l)) => {
-                return Err(ServiceError::Coded(CodedError {
-                    code: "error.unsupportedLanguage",
-                    message: "unsupported language".into(),
-                    params: vec![("language", show(value.as_str()))],
-                }));
-            }
-            "focusMode" if !matches!(value.as_str(), Some("daily" | "durable")) => {
-                return Err(ServiceError::Coded(CodedError {
-                    code: "error.unsupportedFocusMode",
-                    message: "unsupported focus mode".into(),
-                    params: vec![("mode", show(value.as_str()))],
-                }));
-            }
-            "theme" if !matches!(value.as_str(), Some("light" | "dark" | "system")) => {
-                return Err(ServiceError::Coded(CodedError {
-                    code: "error.unsupportedTheme",
-                    message: "unsupported theme".into(),
-                    params: vec![("theme", show(value.as_str()))],
-                }));
-            }
-            "dueNotifyTime"
-                if !matches!(value.as_str(), Some(t) if t.len() == 5 && t.as_bytes()[2] == b':'
-                    && t[..2].parse::<u8>().is_ok_and(|h| h < 24) && t[3..].parse::<u8>().is_ok_and(|m| m < 60)) =>
-            {
-                return Err(ServiceError::Coded(CodedError {
-                    code: "error.unknownSetting",
-                    message: "dueNotifyTime must be HH:MM".into(),
-                    params: vec![("k", key.to_owned())],
-                }));
-            }
-            "weekStart" if !matches!(value.as_u64(), Some(0 | 1)) => {
-                return Err(ServiceError::Coded(CodedError {
-                    code: "error.unknownSetting",
-                    message: "weekStart must be 0 or 1".into(),
-                    params: vec![("k", key.to_owned())],
-                }));
-            }
-            "showMyDayGroupHeadings" if !value.is_boolean() => {
-                return Err(ServiceError::Coded(CodedError {
-                    code: "error.unknownSetting",
-                    message: "showMyDayGroupHeadings must be a boolean".into(),
-                    params: vec![("k", key.to_owned())],
-                }));
-            }
-            "addTasksToTop" | "language" | "focusMode" | "theme" | "dueNotifyTime" | "weekStart"
-            | "showMyDayGroupHeadings" => {}
-            _ => {
-                return Err(ServiceError::Coded(CodedError {
-                    code: "error.unknownSetting",
-                    message: format!("unknown setting {key}"),
-                    params: vec![("k", key.to_owned())],
-                }));
-            }
+    match key {
+        "language" if !matches!(value.as_str(), Some(l) if doene_core::i18n::locales().contains(&l)) =>
+        {
+            return Err(ServiceError::Coded(CodedError {
+                code: "error.unsupportedLanguage",
+                message: "unsupported language".into(),
+                params: vec![("language", show(value.as_str()))],
+            }));
         }
+        "focusMode" if !matches!(value.as_str(), Some("daily" | "durable")) => {
+            return Err(ServiceError::Coded(CodedError {
+                code: "error.unsupportedFocusMode",
+                message: "unsupported focus mode".into(),
+                params: vec![("mode", show(value.as_str()))],
+            }));
+        }
+        "theme" if !matches!(value.as_str(), Some("light" | "dark" | "system")) => {
+            return Err(ServiceError::Coded(CodedError {
+                code: "error.unsupportedTheme",
+                message: "unsupported theme".into(),
+                params: vec![("theme", show(value.as_str()))],
+            }));
+        }
+        "dueNotifyTime"
+            if !matches!(value.as_str(), Some(t) if t.len() == 5 && t.as_bytes()[2] == b':'
+                    && t[..2].parse::<u8>().is_ok_and(|h| h < 24) && t[3..].parse::<u8>().is_ok_and(|m| m < 60)) =>
+        {
+            return Err(ServiceError::Coded(CodedError {
+                code: "error.unknownSetting",
+                message: "dueNotifyTime must be HH:MM".into(),
+                params: vec![("k", key.to_owned())],
+            }));
+        }
+        "weekStart" if !matches!(value.as_u64(), Some(0 | 1)) => {
+            return Err(ServiceError::Coded(CodedError {
+                code: "error.unknownSetting",
+                message: "weekStart must be 0 or 1".into(),
+                params: vec![("k", key.to_owned())],
+            }));
+        }
+        "showMyDayGroupHeadings" if !value.is_boolean() => {
+            return Err(ServiceError::Coded(CodedError {
+                code: "error.unknownSetting",
+                message: "showMyDayGroupHeadings must be a boolean".into(),
+                params: vec![("k", key.to_owned())],
+            }));
+        }
+        "addTasksToTop"
+        | "language"
+        | "focusMode"
+        | "theme"
+        | "dueNotifyTime"
+        | "weekStart"
+        | "showMyDayGroupHeadings" => {}
+        _ => {
+            return Err(ServiceError::Coded(CodedError {
+                code: "error.unknownSetting",
+                message: format!("unknown setting {key}"),
+                params: vec![("k", key.to_owned())],
+            }));
+        }
+    }
     Ok(())
 }
 
@@ -452,7 +499,10 @@ fn check_pref(scope: &str, value: &str) -> Res<()> {
         }));
     }
     if value.trim().is_empty() {
-        return Err(coded("error.prefValueRequired", "preference value required"));
+        return Err(coded(
+            "error.prefValueRequired",
+            "preference value required",
+        ));
     }
     Ok(())
 }
@@ -487,10 +537,19 @@ fn update_in(conn: &Connection, ctx: &Ctx, id: &str, p: TaskPatch) -> Res<Update
         }
         t.parent_id = parent.clone();
     }
-    let field_logged = p.subject.is_some() || p.importance.is_some() || p.due_date.is_some() || p.reminder_at.is_some();
+    let field_logged = p.subject.is_some()
+        || p.importance.is_some()
+        || p.due_date.is_some()
+        || p.reminder_at.is_some();
     let changed = |field: &str, old: String, new: String| -> Res<()> {
         if old != new {
-            log(conn, ctx, Some(id), &format!("{field} changed"), Some(&format!("{old} -> {new}")))?;
+            log(
+                conn,
+                ctx,
+                Some(id),
+                &format!("{field} changed"),
+                Some(&format!("{old} -> {new}")),
+            )?;
         }
         Ok(())
     };
@@ -499,7 +558,11 @@ fn update_in(conn: &Connection, ctx: &Ctx, id: &str, p: TaskPatch) -> Res<Update
         t.subject = v;
     }
     if let Some(v) = p.importance {
-        changed("importance", format!("{:?}", cur.importance).to_lowercase(), format!("{v:?}").to_lowercase())?;
+        changed(
+            "importance",
+            format!("{:?}", cur.importance).to_lowercase(),
+            format!("{v:?}").to_lowercase(),
+        )?;
         t.importance = v;
     }
     if let Some(v) = p.due_date {
@@ -507,7 +570,11 @@ fn update_in(conn: &Connection, ctx: &Ctx, id: &str, p: TaskPatch) -> Res<Update
         t.due_date = v;
     }
     if let Some(v) = p.reminder_at {
-        changed("reminder_at", show(cur.reminder_at.clone()), show(v.clone()))?;
+        changed(
+            "reminder_at",
+            show(cur.reminder_at.clone()),
+            show(v.clone()),
+        )?;
         t.reminder_at = v;
     }
     if let Some(v) = p.body {
@@ -542,7 +609,10 @@ fn update_in(conn: &Connection, ctx: &Ctx, id: &str, p: TaskPatch) -> Res<Update
     if mutated && !field_logged {
         log(conn, ctx, Some(id), "updated", None)?;
     }
-    Ok(UpdateOutcome { task: need(conn, id)?, next: None })
+    Ok(UpdateOutcome {
+        task: need(conn, id)?,
+        next: None,
+    })
 }
 
 fn set_status(conn: &Connection, ctx: &Ctx, id: &str, status: TaskStatus) -> Res<UpdateOutcome> {
@@ -555,7 +625,13 @@ fn set_status(conn: &Connection, ctx: &Ctx, id: &str, status: TaskStatus) -> Res
                 dt.status = TaskStatus::Completed;
                 dt.completed_at = Some(ctx.now.clone());
                 tasks::update_task(conn, &dt)?;
-                log(conn, ctx, Some(&d), "completed", Some(&format!("with parent {}", cur.task.subject)))?;
+                log(
+                    conn,
+                    ctx,
+                    Some(&d),
+                    "completed",
+                    Some(&format!("with parent {}", cur.task.subject)),
+                )?;
             }
         }
         let mut t = cur.task.clone();
@@ -582,13 +658,16 @@ fn set_status(conn: &Connection, ctx: &Ctx, id: &str, status: TaskStatus) -> Res
             n.spawned_from = Some(id.to_owned());
             tasks::update_task(conn, &n)?;
             for s in &cur.steps {
-                tasks::insert_step(conn, &Step {
-                    id: new_id(),
-                    task_id: n.id.clone(),
-                    subject: s.subject.clone(),
-                    status: TaskStatus::Open,
-                    position: s.position,
-                })?;
+                tasks::insert_step(
+                    conn,
+                    &Step {
+                        id: new_id(),
+                        task_id: n.id.clone(),
+                        subject: s.subject.clone(),
+                        status: TaskStatus::Open,
+                        position: s.position,
+                    },
+                )?;
             }
             out_next = Some(need(conn, &n.id)?);
         }
@@ -613,7 +692,10 @@ fn set_status(conn: &Connection, ctx: &Ctx, id: &str, status: TaskStatus) -> Res
             tasks::delete_tasks(conn, &doomed)?;
         }
     }
-    Ok(UpdateOutcome { task: need(conn, id)?, next: out_next })
+    Ok(UpdateOutcome {
+        task: need(conn, id)?,
+        next: out_next,
+    })
 }
 
 impl Service {
@@ -624,7 +706,11 @@ impl Service {
 
     /// A service with an injected clock (tests).
     pub fn with_clock(storage: Storage, clock: Clock) -> Self {
-        Self { storage, clock, undo: Default::default() }
+        Self {
+            storage,
+            clock,
+            undo: Default::default(),
+        }
     }
 
     fn ctx(&self) -> Ctx {
@@ -644,10 +730,19 @@ impl Service {
 
     /// Like [`Self::tx`], but records the prior state so [`Self::undo`] can reverse it.
     /// A failed mutation records nothing.
-    fn tx_undoable<T>(&self, kind: UndoKind, f: impl FnOnce(&Connection, &Ctx) -> Res<T>) -> Res<T> {
+    fn tx_undoable<T>(
+        &self,
+        kind: UndoKind,
+        f: impl FnOnce(&Connection, &Ctx) -> Res<T>,
+    ) -> Res<T> {
         let ctx = self.ctx();
         let tx = self.storage.conn().unchecked_transaction()?;
-        let entry = UndoEntry { kind, tasks: tasks::all_tasks(&tx)?, trash: aux::trash(&tx)?, views: views::all(&tx)? };
+        let entry = UndoEntry {
+            kind,
+            tasks: tasks::all_tasks(&tx)?,
+            trash: aux::trash(&tx)?,
+            views: views::all(&tx)?,
+        };
         let out = f(&tx, &ctx)?;
         tx.commit()?;
         let mut stack = self.undo.lock().unwrap_or_else(|e| e.into_inner());
@@ -660,7 +755,11 @@ impl Service {
 
     /// Whether there is anything to undo, and of what kind (the newest entry).
     pub fn undo_peek(&self) -> Option<UndoKind> {
-        self.undo.lock().unwrap_or_else(|e| e.into_inner()).last().map(|e| e.kind)
+        self.undo
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .last()
+            .map(|e| e.kind)
     }
 
     /// Reverse the most recent undoable mutation. `None` when there is nothing to undo.
@@ -671,10 +770,16 @@ impl Service {
         let r = self.tx(|c, ctx| {
             c.pragma_update(None, "defer_foreign_keys", true)?;
             let now = tasks::all_tasks(c)?;
-            let keep: std::collections::HashSet<&str> = entry.tasks.iter().map(|h| h.task.id.as_str()).collect();
-            let gone: Vec<String> = now.iter().filter(|h| !keep.contains(h.task.id.as_str())).map(|h| h.task.id.clone()).collect();
+            let keep: std::collections::HashSet<&str> =
+                entry.tasks.iter().map(|h| h.task.id.as_str()).collect();
+            let gone: Vec<String> = now
+                .iter()
+                .filter(|h| !keep.contains(h.task.id.as_str()))
+                .map(|h| h.task.id.clone())
+                .collect();
             tasks::delete_tasks(c, &gone)?;
-            let cur: std::collections::HashMap<&str, &HydratedTask> = now.iter().map(|h| (h.task.id.as_str(), h)).collect();
+            let cur: std::collections::HashMap<&str, &HydratedTask> =
+                now.iter().map(|h| (h.task.id.as_str(), h)).collect();
             for h in &entry.tasks {
                 match cur.get(h.task.id.as_str()) {
                     Some(c0) if **c0 == *h => {}
@@ -756,7 +861,12 @@ impl Service {
     }
 
     /// Quick-add: parse `text` (NLP, view defaults) and create the task.
-    pub fn quick_add(&self, text: &str, view: Option<&QuickAddView>, literal: bool) -> Res<HydratedTask> {
+    pub fn quick_add(
+        &self,
+        text: &str,
+        view: Option<&QuickAddView>,
+        literal: bool,
+    ) -> Res<HydratedTask> {
         self.tx_undoable(UndoKind::Create, |c, ctx| {
             let opts = QuickAddOptions {
                 today: ctx.today,
@@ -801,13 +911,16 @@ impl Service {
                 "task": task_json(&t),
                 "subtasks": subtree.iter().map(task_json).collect::<Vec<_>>(),
             });
-            aux::insert_trash(c, &TrashRow {
-                id: trash_id.clone(),
-                kind: "task".into(),
-                label: Some(t.task.subject.clone()),
-                data: data.to_string(),
-                deleted_at: ctx.now.clone(),
-            })?;
+            aux::insert_trash(
+                c,
+                &TrashRow {
+                    id: trash_id.clone(),
+                    kind: "task".into(),
+                    label: Some(t.task.subject.clone()),
+                    data: data.to_string(),
+                    deleted_at: ctx.now.clone(),
+                },
+            )?;
             let mut ids: Vec<String> = subtree.iter().map(|h| h.task.id.clone()).collect();
             ids.push(id.to_owned());
             tasks::delete_tasks(c, &ids)?;
@@ -850,11 +963,17 @@ impl Service {
                 }
             }
             if parent_id != cur.parent_id.as_deref() {
-                log(c, ctx, Some(id), "subtask parent changed", Some(&format!(
-                    "{} -> {}",
-                    cur.parent_id.as_deref().unwrap_or("none"),
-                    parent_id.unwrap_or("none")
-                )))?;
+                log(
+                    c,
+                    ctx,
+                    Some(id),
+                    "subtask parent changed",
+                    Some(&format!(
+                        "{} -> {}",
+                        cur.parent_id.as_deref().unwrap_or("none"),
+                        parent_id.unwrap_or("none")
+                    )),
+                )?;
             }
             cur.parent_id = parent_id.map(str::to_owned);
             cur.position = pos;
@@ -901,7 +1020,13 @@ impl Service {
                 s.position = v;
             }
             tasks::update_step(c, &s)?;
-            log(c, ctx, Some(&s.task_id), "step updated", Some(&format!("{} [{}]", s.subject, token(s.status))))?;
+            log(
+                c,
+                ctx,
+                Some(&s.task_id),
+                "step updated",
+                Some(&format!("{} [{}]", s.subject, token(s.status))),
+            )?;
             Ok(s)
         })
     }
@@ -919,11 +1044,15 @@ impl Service {
     pub fn step_to_task(&self, id: &str) -> Res<HydratedTask> {
         self.tx_undoable(UndoKind::Edit, |c, ctx| {
             let s = tasks::step(c, id)?.ok_or_else(|| not_found("what.step", "step"))?;
-            let t = create_in(c, ctx, NewTask {
-                subject: s.subject.clone(),
-                parent_id: Some(s.task_id.clone()),
-                ..Default::default()
-            })?;
+            let t = create_in(
+                c,
+                ctx,
+                NewTask {
+                    subject: s.subject.clone(),
+                    parent_id: Some(s.task_id.clone()),
+                    ..Default::default()
+                },
+            )?;
             tasks::delete_step(c, id)?;
             log(c, ctx, Some(&s.task_id), "step promoted", Some(&s.subject))?;
             Ok(t)
@@ -941,7 +1070,11 @@ impl Service {
             .into_iter()
             .map(|r| TrashItem {
                 id: r.id,
-                kind: if r.kind == "view" { TrashKind::View } else { TrashKind::Task },
+                kind: if r.kind == "view" {
+                    TrashKind::View
+                } else {
+                    TrashKind::Task
+                },
                 label: r.label,
                 deleted_at: r.deleted_at,
             })
@@ -967,10 +1100,12 @@ impl Service {
     /// Restore a trashed task (with its subtree, steps and tags).
     pub fn restore(&self, id: &str) -> Res<Restored> {
         self.tx_undoable(UndoKind::Restore, |c, ctx| {
-            let row = aux::trash_entry(c, id)?.ok_or_else(|| not_found("what.trashEntry", "trash entry"))?;
+            let row = aux::trash_entry(c, id)?
+                .ok_or_else(|| not_found("what.trashEntry", "trash entry"))?;
             let data: Value = serde_json::from_str(&row.data).unwrap_or(Value::Null);
             if row.kind == "view" {
-                let mut v = view_from_json(&data["view"]).ok_or_else(|| not_found("what.trashEntry", "trash entry"))?;
+                let mut v = view_from_json(&data["view"])
+                    .ok_or_else(|| not_found("what.trashEntry", "trash entry"))?;
                 if views::get(c, &v.view.id)?.is_some() {
                     return Err(coded("error.viewExists", "view already exists"));
                 }
@@ -984,7 +1119,10 @@ impl Service {
                 .chain(data["subtasks"].as_array().into_iter().flatten())
                 .filter_map(task_from_json)
                 .collect();
-            let root_id = items.first().map(|h| h.task.id.clone()).ok_or_else(|| not_found("what.trashEntry", "trash entry"))?;
+            let root_id = items
+                .first()
+                .map(|h| h.task.id.clone())
+                .ok_or_else(|| not_found("what.trashEntry", "trash entry"))?;
             // A parent that no longer exists is dropped: the task returns at top level.
             if let Some(p) = items[0].task.parent_id.clone() {
                 if tasks::task(c, &p)?.is_none() {
@@ -999,7 +1137,13 @@ impl Service {
                 }
             }
             aux::delete_trash(c, id)?;
-            log(c, ctx, Some(&root_id), "restored", Some(&items[0].task.subject))?;
+            log(
+                c,
+                ctx,
+                Some(&root_id),
+                "restored",
+                Some(&items[0].task.subject),
+            )?;
             Ok(Restored::Task(need(c, &root_id)?))
         })
     }
@@ -1016,7 +1160,11 @@ impl Service {
     pub fn create_view(&self, raw: RawView) -> Res<SavedView> {
         self.tx_undoable(UndoKind::Create, |c, ctx| {
             let rules = normalise_view(&raw)?;
-            let v = saved_from_rules(new_id(), rules, views::max_position(c)?.unwrap_or(0.0) + 1.0);
+            let v = saved_from_rules(
+                new_id(),
+                rules,
+                views::max_position(c)?.unwrap_or(0.0) + 1.0,
+            );
             views::insert(c, &v)?;
             log(c, ctx, None, "view created", Some(&v.view.name))?;
             Ok(v)
@@ -1039,13 +1187,16 @@ impl Service {
         self.tx_undoable(UndoKind::Delete, |c, ctx| {
             let v = views::get(c, id)?.ok_or_else(|| not_found("what.view", "view"))?;
             let trash_id = new_id();
-            aux::insert_trash(c, &TrashRow {
-                id: trash_id.clone(),
-                kind: "view".into(),
-                label: Some(v.view.name.clone()),
-                data: json!({ "view": view_json(&v) }).to_string(),
-                deleted_at: ctx.now.clone(),
-            })?;
+            aux::insert_trash(
+                c,
+                &TrashRow {
+                    id: trash_id.clone(),
+                    kind: "view".into(),
+                    label: Some(v.view.name.clone()),
+                    data: json!({ "view": view_json(&v) }).to_string(),
+                    deleted_at: ctx.now.clone(),
+                },
+            )?;
             views::delete(c, id)?;
             log(c, ctx, None, "view deleted", Some(&v.view.name))?;
             Ok(trash_id)
@@ -1056,7 +1207,10 @@ impl Service {
     pub fn move_view(&self, id: &str, index: usize) -> Res<()> {
         self.tx_undoable(UndoKind::Move, |c, ctx| {
             let mut order: Vec<String> = views::all(c)?.into_iter().map(|v| v.view.id).collect();
-            let from = order.iter().position(|v| v == id).ok_or_else(|| not_found("what.view", "view"))?;
+            let from = order
+                .iter()
+                .position(|v| v == id)
+                .ok_or_else(|| not_found("what.view", "view"))?;
             let moved = order.remove(from);
             order.insert(index.min(order.len()), moved);
             for (i, vid) in order.iter().enumerate() {
@@ -1090,12 +1244,18 @@ impl Service {
     /// Notifications due at `now_local` (`YYYY-MM-DDTHH:MM` local time) that have not fired yet.
     /// They are recorded as fired (persisted, pruned to the newest 500) before being returned,
     /// so none repeats across ticks or restarts.
-    pub fn take_due_notifications(&self, now_local: &str) -> Res<Vec<doene_core::notifications::Notification>> {
+    pub fn take_due_notifications(
+        &self,
+        now_local: &str,
+    ) -> Res<Vec<doene_core::notifications::Notification>> {
         use doene_core::notifications as n;
         self.tx(|c, ctx| {
-            let fired: std::collections::HashSet<String> = aux::fired_keys(c)?.into_iter().collect();
+            let fired: std::collections::HashSet<String> =
+                aux::fired_keys(c)?.into_iter().collect();
             let get = |k: &str| -> Res<Option<String>> {
-                Ok(aux::setting(c, k)?.and_then(|s| serde_json::from_str::<Value>(&s).ok()).and_then(|v| v.as_str().map(str::to_owned)))
+                Ok(aux::setting(c, k)?
+                    .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+                    .and_then(|v| v.as_str().map(str::to_owned)))
             };
             let time = get("dueNotifyTime")?.unwrap_or_else(|| n::DEFAULT_DUE_NOTIFY_TIME.into());
             let lang = get("language")?.unwrap_or_else(|| "en".into());
