@@ -7,6 +7,7 @@
 mod app;
 pub mod drawer;
 pub mod model;
+pub mod myday;
 pub mod palette;
 pub mod views;
 
