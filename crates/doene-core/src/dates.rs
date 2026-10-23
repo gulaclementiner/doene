@@ -212,6 +212,22 @@ mod tests {
         assert_eq!(d("2025-12-31").add_days(1), d("2026-01-01"));
         assert_eq!(d("2025-03-12").add_days(7), d("2025-03-19")); // Gör't: nextDate weekly
         assert_eq!(d("2025-03-14").add_days(-2), d("2025-03-12"));
+        // Ticket #08 fixtures:
+        assert_eq!(d("2026-07-15").add_days(1), d("2026-07-16"));
+        assert_eq!(d("2026-07-15").add_days(-1), d("2026-07-14"));
+        assert_eq!(d("2026-07-31").add_days(1), d("2026-08-01"));
+        assert_eq!(d("2026-08-01").add_days(-1), d("2026-07-31"));
+        assert_eq!(d("2026-12-31").add_days(1), d("2027-01-01"));
+        assert_eq!(d("2027-01-01").add_days(-1), d("2026-12-31"));
+    }
+
+    #[test]
+    fn add_days_respects_leap_years() {
+        // Ticket #08 fixtures:
+        assert_eq!(d("2024-02-28").add_days(1), d("2024-02-29")); // leap year
+        assert_eq!(d("2025-02-28").add_days(1), d("2025-03-01")); // common year
+        assert_eq!(d("2000-02-28").add_days(2), d("2000-03-01")); // 400-year leap
+        assert_eq!(d("1900-02-28").add_days(1), d("1900-03-01")); // century non-leap
     }
 
     #[test]

@@ -7,6 +7,8 @@ pub mod dates;
 pub mod dnd;
 pub mod entities;
 pub mod errors;
+pub mod i18n;
+pub mod labels;
 pub mod recurrence;
 pub mod tree;
 
