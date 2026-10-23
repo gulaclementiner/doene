@@ -142,3 +142,37 @@ proptest! {
         prop_assert_eq!(v1, v2);
     }
 }
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(500))]
+
+    /// Ported from "nlp: never throws, subject is trimmed, due dates are valid".
+    #[test]
+    fn nlp_never_panics_subject_trimmed(text in "\\PC{0,60}", today in day()) {
+        use doene_core::nlp::{ParseOptions, parse_quick_add};
+        let r = parse_quick_add(&text, today, &ParseOptions::default());
+        prop_assert_eq!(r.subject.trim(), r.subject.as_str());
+        prop_assert!(!r.subject.contains(char::is_whitespace) || r.subject.split(' ').all(|w| !w.is_empty()));
+        if let Some(d) = r.due_date {
+            prop_assert!(Date::parse(&d.to_string()).is_ok());
+        }
+    }
+
+    /// Keyword-flavoured fuzz: recognised phrases mixed with noise never panic.
+    #[test]
+    fn nlp_phrase_soup_never_panics(
+        parts in proptest::collection::vec(
+            prop_oneof![
+                Just("every 1st"), Just("every 31st"), Just("2025-02-31"), Just("2024-02-29"),
+                Just("at 9am"), Just("at 25"), Just("tonight"), Just("every mon, fri"),
+                Just("!high"), Just("#Tag"), Just("in 99 months"), Just("xoday"), Just("ünï"),
+            ],
+            0..6,
+        ),
+        today in day(),
+    ) {
+        use doene_core::nlp::{ParseOptions, parse_quick_add};
+        let r = parse_quick_add(&parts.join(" "), today, &ParseOptions::default());
+        prop_assert_eq!(r.subject.trim(), r.subject.as_str());
+    }
+}

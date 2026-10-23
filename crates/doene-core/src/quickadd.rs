@@ -57,7 +57,10 @@ pub fn quick_add(
     if v.is_empty() {
         return Err(CodedError::new("error.textRequired", "text required"));
     }
-    let parse_opts = ParseOptions { locale: opts.locale.clone(), tags: true };
+    let parse_opts = ParseOptions {
+        locale: opts.locale.clone(),
+        tags: true,
+    };
     let parsed = if opts.literal {
         None
     } else {
@@ -84,8 +87,22 @@ pub fn quick_add(
     };
 
     let (subject, importance, due_date, reminder_at, recurrence, typed_tags) = match parsed {
-        Some(p) => (p.subject, p.importance, p.due_date, p.reminder_at, p.recurrence, p.tags),
-        None => (String::new(), ImportanceLevel::Normal, None, None, None, Vec::new()),
+        Some(p) => (
+            p.subject,
+            p.importance,
+            p.due_date,
+            p.reminder_at,
+            p.recurrence,
+            p.tags,
+        ),
+        None => (
+            String::new(),
+            ImportanceLevel::Normal,
+            None,
+            None,
+            None,
+            Vec::new(),
+        ),
     };
 
     let mut seen = HashSet::new();
@@ -98,7 +115,11 @@ pub fn quick_add(
 
     Ok(TaskDraft {
         // Nothing left after parsing (e.g. just "weekdays"): keep the typed text.
-        subject: if subject.is_empty() { v.to_owned() } else { subject },
+        subject: if subject.is_empty() {
+            v.to_owned()
+        } else {
+            subject
+        },
         shortlisted: matches!(smart, Some("my-day" | "shortlisted")),
         importance: if importance != ImportanceLevel::Normal {
             importance
@@ -107,7 +128,11 @@ pub fn quick_add(
         } else {
             ImportanceLevel::Normal
         },
-        due_date: due_date.or(if smart == Some("planned") { Some(opts.today) } else { None }),
+        due_date: due_date.or(if smart == Some("planned") {
+            Some(opts.today)
+        } else {
+            None
+        }),
         reminder_at,
         recurrence,
         tags,

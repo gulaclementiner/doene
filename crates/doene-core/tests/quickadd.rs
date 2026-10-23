@@ -16,7 +16,10 @@ fn views() -> Vec<View> {
         match_mode: mode,
         show_done: false,
         position: 0.0,
-        tags: tags.iter().map(|t| Tag::new(t).expect("valid tag")).collect(),
+        tags: tags
+            .iter()
+            .map(|t| Tag::new(t).expect("valid tag"))
+            .collect(),
     };
     vec![
         mk("V1", "Work", &["work", "urgent"], MatchMode::All),
@@ -80,7 +83,10 @@ fn view_defaults_my_day_shortlisted_important_planned() {
 
 #[test]
 fn parsed_fields_beat_view_defaults_and_hash_word_becomes_a_tag() {
-    let b = qa("Pay rent tomorrow !low #home", QuickAddView::Smart("important".into()));
+    let b = qa(
+        "Pay rent tomorrow !low #home",
+        QuickAddView::Smart("important".into()),
+    );
     assert_eq!(b.due_date, Some(Date::parse("2025-03-13").unwrap()));
     assert_eq!(b.importance, ImportanceLevel::Low);
     let tags: Vec<&str> = b.tags.iter().map(|t| t.as_str()).collect();
@@ -93,8 +99,14 @@ fn inside_a_view_a_new_task_is_tagged_to_stay_in_it() {
     fn tags(b: &doene_core::quickadd::TaskDraft) -> Vec<&str> {
         b.tags.iter().map(|t| t.as_str()).collect()
     }
-    assert_eq!(tags(&qa("x", QuickAddView::Custom("V1".into()))), vec!["work", "urgent"]);
-    assert_eq!(tags(&qa("x", QuickAddView::Custom("V2".into()))), vec!["home"]);
+    assert_eq!(
+        tags(&qa("x", QuickAddView::Custom("V1".into()))),
+        vec!["work", "urgent"]
+    );
+    assert_eq!(
+        tags(&qa("x", QuickAddView::Custom("V2".into()))),
+        vec!["home"]
+    );
     // A view with no tags adds none.
     assert!(tags(&qa("x", QuickAddView::Custom("V3".into()))).is_empty());
 }

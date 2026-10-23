@@ -31,7 +31,12 @@ fn p_on(text: &str, day: &str) -> ParsedQuickAdd {
 
 /// A fixed-kind recurrence rule (`daily`, …).
 fn rtype(kind: RecurrenceType) -> RecurrenceRule {
-    RecurrenceRule { kind, interval: None, unit: None, days: None }
+    RecurrenceRule {
+        kind,
+        interval: None,
+        unit: None,
+        days: None,
+    }
 }
 
 /// A custom `every N <unit>` rule.
@@ -184,7 +189,10 @@ fn bare_hour_times() {
 #[test]
 fn time_chips() {
     let r = p("x at 7");
-    assert_eq!(chips(&r), vec!["due: 2025-03-12".to_owned(), "at: 07:00".to_owned()]);
+    assert_eq!(
+        chips(&r),
+        vec!["due: 2025-03-12".to_owned(), "at: 07:00".to_owned()]
+    );
 }
 
 // --- Gör't `nlp: time sets a reminder` (nlp-search.test.js) ------------------
@@ -243,15 +251,39 @@ fn importance_and_tags() {
 
 #[test]
 fn recurrence_every_n_unit() {
-    assert_eq!(p("x every 2 days").recurrence, Some(rcust(2, RecurrenceUnit::Day)));
-    assert_eq!(p("x every 3 weeks").recurrence, Some(rcust(3, RecurrenceUnit::Week)));
-    assert_eq!(p("x every 2 months").recurrence, Some(rcust(2, RecurrenceUnit::Month)));
-    assert_eq!(p("x every 5 years").recurrence, Some(rcust(5, RecurrenceUnit::Year)));
+    assert_eq!(
+        p("x every 2 days").recurrence,
+        Some(rcust(2, RecurrenceUnit::Day))
+    );
+    assert_eq!(
+        p("x every 3 weeks").recurrence,
+        Some(rcust(3, RecurrenceUnit::Week))
+    );
+    assert_eq!(
+        p("x every 2 months").recurrence,
+        Some(rcust(2, RecurrenceUnit::Month))
+    );
+    assert_eq!(
+        p("x every 5 years").recurrence,
+        Some(rcust(5, RecurrenceUnit::Year))
+    );
     // Interval 1 collapses to the fixed kind.
-    assert_eq!(p("x every 1 day").recurrence, Some(rtype(RecurrenceType::Daily)));
-    assert_eq!(p("x every 1 week").recurrence, Some(rtype(RecurrenceType::Weekly)));
-    assert_eq!(p("x every 1 month").recurrence, Some(rtype(RecurrenceType::Monthly)));
-    assert_eq!(p("x every 1 year").recurrence, Some(rtype(RecurrenceType::Yearly)));
+    assert_eq!(
+        p("x every 1 day").recurrence,
+        Some(rtype(RecurrenceType::Daily))
+    );
+    assert_eq!(
+        p("x every 1 week").recurrence,
+        Some(rtype(RecurrenceType::Weekly))
+    );
+    assert_eq!(
+        p("x every 1 month").recurrence,
+        Some(rtype(RecurrenceType::Monthly))
+    );
+    assert_eq!(
+        p("x every 1 year").recurrence,
+        Some(rtype(RecurrenceType::Yearly))
+    );
 }
 
 #[test]
@@ -269,7 +301,12 @@ fn recurrence_bare_keywords() {
         ("every daily", RecurrenceType::Daily),
     ];
     for (word, kind) in cases {
-        assert_eq!(p(&format!("x {word}")).recurrence, Some(rtype(kind)), "{}", word);
+        assert_eq!(
+            p(&format!("x {word}")).recurrence,
+            Some(rtype(kind)),
+            "{}",
+            word
+        );
     }
     let every = [
         ("day", RecurrenceType::Daily),
@@ -279,13 +316,21 @@ fn recurrence_bare_keywords() {
         ("weekday", RecurrenceType::Weekdays),
     ];
     for (word, kind) in every {
-        assert_eq!(p(&format!("x every {word}")).recurrence, Some(rtype(kind)), "{}", word);
+        assert_eq!(
+            p(&format!("x every {word}")).recurrence,
+            Some(rtype(kind)),
+            "{}",
+            word
+        );
     }
     // Singular 'weekday' without 'every' is plain text.
     assert_eq!(p("x weekday").recurrence, None);
     // Case-insensitive.
     assert_eq!(p("x Daily").recurrence, Some(rtype(RecurrenceType::Daily)));
-    assert_eq!(p("x ANNUALLY").recurrence, Some(rtype(RecurrenceType::Yearly)));
+    assert_eq!(
+        p("x ANNUALLY").recurrence,
+        Some(rtype(RecurrenceType::Yearly))
+    );
 }
 
 #[test]
@@ -293,12 +338,24 @@ fn recurrence_first_occurrence_due_date() {
     // Without a recFirst hook the due date is today, labelled 'first occurrence'.
     let r = p("x daily");
     assert_eq!(r.due_date, Some(today()));
-    assert_eq!(chips(&r), vec!["due: first occurrence".to_owned(), "repeat: daily".to_owned()]);
+    assert_eq!(
+        chips(&r),
+        vec![
+            "due: first occurrence".to_owned(),
+            "repeat: daily".to_owned()
+        ]
+    );
     assert_eq!(r.subject, "x");
 
     let r = p("x every 2 weeks");
     assert_eq!(r.due_date, Some(today()));
-    assert_eq!(chips(&r), vec!["due: first occurrence".to_owned(), "repeat: every 2 weeks".to_owned()]);
+    assert_eq!(
+        chips(&r),
+        vec![
+            "due: first occurrence".to_owned(),
+            "repeat: every 2 weeks".to_owned()
+        ]
+    );
 
     for text in ["x weekly", "x monthly", "x yearly"] {
         assert_eq!(p(text).due_date, Some(today()), "{}", text);
@@ -334,10 +391,16 @@ fn recurrence_weekday_lists() {
     assert_eq!(p("x every fri tomorrow").due_date, Some(d("2025-03-13")));
 
     let r = p("x every fri and mon");
-    assert_eq!(r.recurrence.as_ref().and_then(|r| r.days.clone()), Some(vec![Weekday::Mon, Weekday::Fri]));
+    assert_eq!(
+        r.recurrence.as_ref().and_then(|r| r.days.clone()),
+        Some(vec![Weekday::Mon, Weekday::Fri])
+    );
 
     // Duplicates collapse to a single-day weekly rule.
-    assert_eq!(p("x every mon and mon").recurrence, Some(rtype(RecurrenceType::Weekly)));
+    assert_eq!(
+        p("x every mon and mon").recurrence,
+        Some(rtype(RecurrenceType::Weekly))
+    );
 }
 
 #[test]
@@ -361,9 +424,18 @@ fn recurrence_nth_of_month() {
     }
 
     // Month-length clamping: 31st of a shorter month lands on its last day.
-    assert_eq!(p_on("x every 31st", "2025-03-31").due_date, Some(d("2025-04-30")));
-    assert_eq!(p_on("x every 30th", "2025-01-31").due_date, Some(d("2025-02-28")));
-    assert_eq!(p_on("x every 31st", "2025-12-31").due_date, Some(d("2026-01-31")));
+    assert_eq!(
+        p_on("x every 31st", "2025-03-31").due_date,
+        Some(d("2025-04-30"))
+    );
+    assert_eq!(
+        p_on("x every 30th", "2025-01-31").due_date,
+        Some(d("2025-02-28"))
+    );
+    assert_eq!(
+        p_on("x every 31st", "2025-12-31").due_date,
+        Some(d("2026-01-31"))
+    );
 
     // Out-of-range ordinals are not recurrences.
     assert_eq!(p("x every 32nd").recurrence, None);
@@ -394,7 +466,10 @@ fn bare_weekdays_combines_with_times() {
     }
 
     // On a Friday the first occurrence is today.
-    assert_eq!(p_on("x weekdays", "2025-03-15").due_date, Some(d("2025-03-15")));
+    assert_eq!(
+        p_on("x weekdays", "2025-03-15").due_date,
+        Some(d("2025-03-15"))
+    );
 }
 
 // --- Gör't `nlp: bare-hour times` (extended) ---------------------------------
@@ -415,7 +490,10 @@ fn bare_hour_times_extended() {
     }
     assert_eq!(p("x at 24").time, None);
     assert_eq!(p("x at 99").time, None);
-    assert_eq!(chips(&p("x at 7")), vec!["due: 2025-03-12".to_owned(), "at: 07:00".to_owned()]);
+    assert_eq!(
+        chips(&p("x at 7")),
+        vec!["due: 2025-03-12".to_owned(), "at: 07:00".to_owned()]
+    );
 }
 
 // --- Gör't `nlp: combined sentence and whitespace` ----------------------------

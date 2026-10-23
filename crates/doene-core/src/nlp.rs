@@ -38,7 +38,10 @@ pub struct ParseOptions {
 
 impl Default for ParseOptions {
     fn default() -> Self {
-        Self { locale: None, tags: true }
+        Self {
+            locale: None,
+            tags: true,
+        }
     }
 }
 
@@ -95,9 +98,29 @@ pub struct NearMiss {
 /// Date words a user might mistype (Gör't's `EN_KEYWORDS`). Short words are
 /// left out: within distance 2 almost every short word would light up.
 const EN_KEYWORDS: [&str; 23] = [
-    "today", "tonight", "tomorrow", "tmrw", "yesterday", "noon", "midnight", "daily", "weekly",
-    "monthly", "yearly", "annually", "weekdays", "sunday", "monday", "tuesday", "wednesday",
-    "thursday", "friday", "saturday", "week", "month", "year",
+    "today",
+    "tonight",
+    "tomorrow",
+    "tmrw",
+    "yesterday",
+    "noon",
+    "midnight",
+    "daily",
+    "weekly",
+    "monthly",
+    "yearly",
+    "annually",
+    "weekdays",
+    "sunday",
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "week",
+    "month",
+    "year",
 ];
 
 /// Gör't's `nearMisses` for English.
@@ -105,7 +128,10 @@ fn near_misses(subject: &str) -> Vec<NearMiss> {
     let mut out = Vec::new();
     for raw in subject.split_whitespace() {
         let w = raw.to_lowercase();
-        if w.chars().count() < 4 || !w.chars().all(char::is_alphabetic) || EN_KEYWORDS.contains(&w.as_str()) {
+        if w.chars().count() < 4
+            || !w.chars().all(char::is_alphabetic)
+            || EN_KEYWORDS.contains(&w.as_str())
+        {
             continue;
         }
         let mut best: Option<(usize, &str)> = None;
@@ -116,7 +142,10 @@ fn near_misses(subject: &str) -> Vec<NearMiss> {
             }
         }
         if let Some((_, k)) = best {
-            out.push(NearMiss { word: w, suggestion: k.to_owned() });
+            out.push(NearMiss {
+                word: w,
+                suggestion: k.to_owned(),
+            });
         }
     }
     out
@@ -175,7 +204,10 @@ pub fn parse_quick_add(text: &str, today: Date, opts: &ParseOptions) -> ParsedQu
             ImportanceLevel::Low => "importance.low",
             ImportanceLevel::Normal => unreachable!(),
         };
-        out.chips.push(chip("chip.importance", [("level".to_owned(), level.to_owned())]));
+        out.chips.push(chip(
+            "chip.importance",
+            [("level".to_owned(), level.to_owned())],
+        ));
     }
 
     // 2. Tags: every `#word` (Gör't loops until none remain). Words stay raw
@@ -183,8 +215,10 @@ pub fn parse_quick_add(text: &str, today: Date, opts: &ParseOptions) -> ParsedQu
     if opts.tags {
         while take(&re.tag, &mut s, |m| {
             // The tag character class guarantees a non-empty word without spaces.
-            out.tags.push(Tag::new(&m[1]).expect("tag pattern yields a valid Tag"));
-            out.chips.push(chip("chip.tag", [("tag".to_owned(), m[1].to_owned())]));
+            out.tags
+                .push(Tag::new(&m[1]).expect("tag pattern yields a valid Tag"));
+            out.chips
+                .push(chip("chip.tag", [("tag".to_owned(), m[1].to_owned())]));
             true
         }) {}
     }
@@ -197,7 +231,12 @@ pub fn parse_quick_add(text: &str, today: Date, opts: &ParseOptions) -> ParsedQu
             return false;
         }
         let min = m.get(2).map(|c| c.as_str()).unwrap_or("00").to_owned();
-        let hour = (h % 12) + if m[3].eq_ignore_ascii_case("pm") { 12 } else { 0 };
+        let hour = (h % 12)
+            + if m[3].eq_ignore_ascii_case("pm") {
+                12
+            } else {
+                0
+            };
         out.time = Some(format!("{hour:02}:{min}"));
         true
     }) && !take(&re.hhmm, &mut s, |m| {
@@ -216,7 +255,14 @@ pub fn parse_quick_add(text: &str, today: Date, opts: &ParseOptions) -> ParsedQu
         out.time = Some(format!("{h:02}:00"));
         true
     }) && !take(&re.noonmid, &mut s, |m| {
-        out.time = Some(if m[1].eq_ignore_ascii_case("noon") { "12:00" } else { "00:00" }.to_owned());
+        out.time = Some(
+            if m[1].eq_ignore_ascii_case("noon") {
+                "12:00"
+            } else {
+                "00:00"
+            }
+            .to_owned(),
+        );
         true
     }) {}
 
@@ -247,7 +293,12 @@ pub fn parse_quick_add(text: &str, today: Date, opts: &ParseOptions) -> ParsedQu
         // be one of the six fixed keywords.
         let every = m[0].trim().to_lowercase().starts_with("every");
         let k = m[1].to_lowercase();
-        if !every && !matches!(k.as_str(), "daily" | "weekdays" | "weekly" | "monthly" | "yearly" | "annually") {
+        if !every
+            && !matches!(
+                k.as_str(),
+                "daily" | "weekdays" | "weekly" | "monthly" | "yearly" | "annually"
+            )
+        {
             return false;
         }
         out.recurrence = Some(match k.as_str() {
@@ -276,7 +327,11 @@ pub fn parse_quick_add(text: &str, today: Date, opts: &ParseOptions) -> ParsedQu
                 kind: RecurrenceType::Custom,
                 interval: Some(1),
                 unit: Some(RecurrenceUnit::Week),
-                days: Some(days.iter().map(|d| Weekday::from_dow(*d).expect("valid dow")).collect()),
+                days: Some(
+                    days.iter()
+                        .map(|d| Weekday::from_dow(*d).expect("valid dow"))
+                        .collect(),
+                ),
             }
         });
         rec_first = Some(RecFirst::Weekdays(days));
@@ -348,7 +403,11 @@ pub fn parse_quick_add(text: &str, today: Date, opts: &ParseOptions) -> ParsedQu
             None => Some(today),
         };
         if let Some(date) = first {
-            set_due_labeled(&mut out, date, i18n::tr("recurrence.firstOccurrence", &HashMap::new(), Some("en")));
+            set_due_labeled(
+                &mut out,
+                date,
+                i18n::tr("recurrence.firstOccurrence", &HashMap::new(), Some("en")),
+            );
         }
     }
     // The repeat chip is emitted for every parsed recurrence, explicit date or
@@ -356,7 +415,10 @@ pub fn parse_quick_add(text: &str, today: Date, opts: &ParseOptions) -> ParsedQu
     if let Some(rule) = &out.recurrence {
         out.chips.push(chip(
             "chip.repeat",
-            [("rule".to_owned(), labels::rec_label(rule, Some("en"), i18n::week_start(Some("en"))))],
+            [(
+                "rule".to_owned(),
+                labels::rec_label(rule, Some("en"), i18n::week_start(Some("en"))),
+            )],
         ));
     }
 
@@ -420,15 +482,20 @@ fn en_re() -> &'static EnRe {
         .expect("valid pattern"),
         every_unit: Regex::new(r"(?i)\severy\s+(day|week|month|year|weekday)\s")
             .expect("valid pattern"),
-        every_weekday_list: Regex::new(&format!(r"(?i)\severy\s+({WD_RE}(?:\s*(?:,|and|&)\s*{WD_RE})*)\s"))
+        every_weekday_list: Regex::new(&format!(
+            r"(?i)\severy\s+({WD_RE}(?:\s*(?:,|and|&)\s*{WD_RE})*)\s"
+        ))
+        .expect("valid pattern"),
+        every_nth: Regex::new(r"(?i)\severy\s+([0-9]{1,2})(?:st|nd|rd|th)\s")
             .expect("valid pattern"),
-        every_nth: Regex::new(r"(?i)\severy\s+([0-9]{1,2})(?:st|nd|rd|th)\s").expect("valid pattern"),
         day_words: Regex::new(r"(?i)\s(today|tonight|tomorrow|tmrw|yesterday)\s")
             .expect("valid pattern"),
-        in_n_unit: Regex::new(r"(?i)\sin\s+([0-9]+)\s*(day|week|month)s?\s").expect("valid pattern"),
+        in_n_unit: Regex::new(r"(?i)\sin\s+([0-9]+)\s*(day|week|month)s?\s")
+            .expect("valid pattern"),
         next_week: Regex::new(r"(?i)\snext\s+week\s").expect("valid pattern"),
         next_month: Regex::new(r"(?i)\snext\s+month\s").expect("valid pattern"),
-        weekday: Regex::new(&format!(r"(?i)\s(?:on\s+|next\s+)?({WD_RE})\s")).expect("valid pattern"),
+        weekday: Regex::new(&format!(r"(?i)\s(?:on\s+|next\s+)?({WD_RE})\s"))
+            .expect("valid pattern"),
         iso: Regex::new(r"\s([0-9]{4}-[0-9]{2}-[0-9]{2})\s").expect("valid pattern"),
     })
 }
@@ -452,13 +519,15 @@ fn take(re: &Regex, s: &mut String, f: impl FnOnce(&regex::Captures) -> bool) ->
 /// the ISO date; recurrence first-occurrence dates use a translated label).
 fn set_due(out: &mut ParsedQuickAdd, date: Date) {
     out.due_date = Some(date);
-    out.chips.push(chip("chip.due", [("date".to_owned(), date.to_string())]));
+    out.chips
+        .push(chip("chip.due", [("date".to_owned(), date.to_string())]));
 }
 
 /// `set` with an explicit chip label (Gör't's `set(d, label)`).
 fn set_due_labeled(out: &mut ParsedQuickAdd, date: Date, label: String) {
     out.due_date = Some(date);
-    out.chips.push(chip("chip.due", [("date".to_owned(), label)]));
+    out.chips
+        .push(chip("chip.due", [("date".to_owned(), label)]));
 }
 
 fn chip(key: &str, vars: impl IntoIterator<Item = (String, String)>) -> Chip {
@@ -487,7 +556,12 @@ fn next_weekday(from: Date, d: u8) -> Date {
 
 /// A fixed-kind recurrence rule (`daily`, `weekly`, …).
 fn fixed_kind(kind: RecurrenceType) -> RecurrenceRule {
-    RecurrenceRule { kind, interval: None, unit: None, days: None }
+    RecurrenceRule {
+        kind,
+        interval: None,
+        unit: None,
+        days: None,
+    }
 }
 
 /// Gör't's `UNIT_TYPE`: the fixed kind a unit collapses to at interval 1.
