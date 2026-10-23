@@ -5,8 +5,8 @@ use std::collections::HashMap;
 
 use doene_core::i18n::tr;
 use doene_core::recurrence::{RawRecurrence, TYPES};
-use doene_core::{Date, Importance, RecurrenceRule};
-use doene_service::{Service, ServiceError, TaskPatch};
+use doene_core::{Date, Importance, RecurrenceRule, TaskStatus};
+use doene_service::{Service, ServiceError, StepPatch, TaskPatch};
 
 /// Drawer sections in default order (ids match the `section.*` locale keys).
 pub const SECTIONS: [&str; 8] =
@@ -166,6 +166,53 @@ pub fn apply_edit(service: &Service, id: &str, edit: FieldEdit, locale: &str) ->
     service.update_task(id, patch).map(|_| ()).map_err(|e| error_message(&e, locale))
 }
 
+/// One step action from the drawer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StepEdit {
+    Add(String),
+    /// Flip open/completed.
+    Toggle(String),
+    Delete(String),
+    /// Turn the step into a real subtask.
+    Promote(String),
+}
+
+/// Apply a step action to `task_id`; `Err` is a localised message.
+pub fn apply_step(service: &Service, task_id: &str, edit: StepEdit, locale: &str) -> Result<(), String> {
+    let r = match edit {
+        StepEdit::Add(s) => service.create_step(task_id, &s).map(|_| ()),
+        StepEdit::Toggle(id) => service.task(task_id).and_then(|h| {
+            let cur = h.steps.iter().find(|s| s.id == id).map(|s| s.status);
+            let next = if cur == Some(TaskStatus::Completed) { TaskStatus::Open } else { TaskStatus::Completed };
+            service.update_step(&id, StepPatch { status: Some(next), ..Default::default() }).map(|_| ())
+        }),
+        StepEdit::Delete(id) => service.delete_step(&id),
+        StepEdit::Promote(id) => service.step_to_task(&id).map(|_| ()),
+    };
+    r.map_err(|e| error_message(&e, locale))
+}
+
+/// A step as shown in the drawer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StepRow {
+    pub id: String,
+    pub subject: String,
+    pub done: bool,
+}
+
+/// The task's steps in position order.
+pub fn step_rows(service: &Service, task_id: &str) -> Vec<StepRow> {
+    service
+        .task(task_id)
+        .map(|h| {
+            h.steps
+                .into_iter()
+                .map(|s| StepRow { done: s.status == TaskStatus::Completed, id: s.id, subject: s.subject })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// One activity line: local-ish timestamp, action, detail.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActivityLine {
@@ -305,5 +352,29 @@ mod tests {
         assert_eq!(o.len(), SECTIONS.len());
         assert_eq!(o[..2], ["notes", "tags"]);
         assert_eq!(parse_order(Some("not json")), SECTIONS);
+    }
+
+    #[test]
+    fn steps_add_tick_delete_and_promote() {
+        let (s, _d) = svc();
+        let id = task(&s);
+        for n in ["a", "b", "c"] {
+            apply_step(&s, &id, StepEdit::Add(n.into()), "en").unwrap();
+        }
+        assert_eq!(apply_step(&s, &id, StepEdit::Add(" ".into()), "en").unwrap_err(), "subject required");
+        let rows = step_rows(&s, &id);
+        assert_eq!(rows.iter().map(|r| r.subject.as_str()).collect::<Vec<_>>(), ["a", "b", "c"]);
+        apply_step(&s, &id, StepEdit::Toggle(rows[0].id.clone()), "en").unwrap();
+        assert!(step_rows(&s, &id)[0].done);
+        apply_step(&s, &id, StepEdit::Toggle(rows[0].id.clone()), "en").unwrap();
+        assert!(!step_rows(&s, &id)[0].done);
+        apply_step(&s, &id, StepEdit::Delete(rows[1].id.clone()), "en").unwrap();
+        apply_step(&s, &id, StepEdit::Promote(rows[2].id.clone()), "en").unwrap();
+        assert_eq!(step_rows(&s, &id).len(), 1);
+        let kids: Vec<_> = s.all_tasks().unwrap().into_iter().filter(|t| t.task.parent_id.as_deref() == Some(&id)).collect();
+        assert_eq!(kids.len(), 1);
+        assert_eq!(kids[0].task.subject, "c");
+        s.undo().unwrap();
+        assert_eq!(step_rows(&s, &id).len(), 2);
     }
 }
