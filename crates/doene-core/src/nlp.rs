@@ -14,9 +14,7 @@
 //! surviving string collapses to the same subject and no pattern depends on
 //! double spaces, so all fixture behaviour is preserved.
 //!
-//! Divergences: impossible ISO dates stay in the subject (D6); `!low` parses
-//! as a low importance level here while quick-add maps it to normal for the
-//! task body (D7).
+//! Divergences: impossible ISO dates stay in the subject (D6).
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -80,6 +78,70 @@ pub struct ParsedQuickAdd {
     pub tags: Vec<Tag>,
     /// Chips in parse order (importance, due, repeat, at).
     pub chips: Vec<Chip>,
+    /// "Did you mean …?" hints for subject words within edit distance 2 of a
+    /// date keyword (the word itself stays in the subject).
+    pub suggestions: Vec<NearMiss>,
+}
+
+/// One near-miss hint (Gör't's `{ word, suggestion }`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NearMiss {
+    /// The lowercased subject word.
+    pub word: String,
+    /// The keyword it probably meant.
+    pub suggestion: String,
+}
+
+/// Date words a user might mistype (Gör't's `EN_KEYWORDS`). Short words are
+/// left out: within distance 2 almost every short word would light up.
+const EN_KEYWORDS: [&str; 23] = [
+    "today", "tonight", "tomorrow", "tmrw", "yesterday", "noon", "midnight", "daily", "weekly",
+    "monthly", "yearly", "annually", "weekdays", "sunday", "monday", "tuesday", "wednesday",
+    "thursday", "friday", "saturday", "week", "month", "year",
+];
+
+/// Gör't's `nearMisses` for English.
+fn near_misses(subject: &str) -> Vec<NearMiss> {
+    let mut out = Vec::new();
+    for raw in subject.split_whitespace() {
+        let w = raw.to_lowercase();
+        if w.chars().count() < 4 || !w.chars().all(char::is_alphabetic) || EN_KEYWORDS.contains(&w.as_str()) {
+            continue;
+        }
+        let mut best: Option<(usize, &str)> = None;
+        for k in EN_KEYWORDS {
+            let d = edit_distance(&w, k);
+            if d <= 2 && best.is_none_or(|(bd, _)| d < bd) {
+                best = Some((d, k));
+            }
+        }
+        if let Some((_, k)) = best {
+            out.push(NearMiss { word: w, suggestion: k.to_owned() });
+        }
+    }
+    out
+}
+
+/// Levenshtein distance over chars (Gör't's `editDistance`).
+pub fn edit_distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    if a.is_empty() {
+        return b.len();
+    }
+    if b.is_empty() {
+        return a.len();
+    }
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    for i in 1..=a.len() {
+        let mut cur = vec![i];
+        for j in 1..=b.len() {
+            let sub = prev[j - 1] + usize::from(a[i - 1] != b[j - 1]);
+            cur.push((prev[j] + 1).min(cur[j - 1] + 1).min(sub));
+        }
+        prev = cur;
+    }
+    prev[b.len()]
 }
 
 /// Parse a quick-add line against `today`, mirroring Gör't's `parseQuickAdd`.
@@ -96,6 +158,7 @@ pub fn parse_quick_add(text: &str, today: Date, opts: &ParseOptions) -> ParsedQu
         importance: ImportanceLevel::Normal,
         tags: Vec::new(),
         chips: Vec::new(),
+        suggestions: Vec::new(),
     };
 
     // 1. Importance marker: `!high`, `!low`, or the double-bang `!!` (Gör't's
@@ -310,6 +373,7 @@ pub fn parse_quick_add(text: &str, today: Date, opts: &ParseOptions) -> ParsedQu
     // 8. Subject: collapse all whitespace runs to single spaces (Gör't's
     //    `s.replace(/\s+/g, ' ').trim()`).
     out.subject = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    out.suggestions = near_misses(&out.subject);
     out
 }
 

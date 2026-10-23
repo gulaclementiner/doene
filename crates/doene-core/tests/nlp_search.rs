@@ -436,3 +436,54 @@ fn combined_sentence_and_whitespace() {
     assert_eq!(p("").subject, "");
     assert_eq!(p("   ").subject, "");
 }
+
+// --- Gör't `nlp: keyword near-miss suggestions (en)` --------------------------
+// A subject word within edit distance 2 of a known date keyword earns a
+// "did you mean …?" hint. Exact matches, words under 4 letters and
+// non-letter words are skipped. The word itself stays in the subject.
+
+#[test]
+fn keyword_suggestions() {
+    for (typo, keyword) in [
+        ("xoday", "today"),
+        ("xonight", "tonight"),
+        ("xomorrow", "tomorrow"),
+        ("xmrw", "tmrw"),
+        ("xesterday", "yesterday"),
+        ("xoon", "noon"),
+        ("xidnight", "midnight"),
+        ("xaily", "daily"),
+        ("xeekly", "weekly"),
+        ("xonthly", "monthly"),
+        ("xearly", "yearly"),
+        ("xnnually", "annually"),
+        ("xeekdays", "weekdays"),
+        ("xunday", "sunday"),
+        ("xonday", "monday"),
+        ("xuesday", "tuesday"),
+        ("xednesday", "wednesday"),
+        ("xhursday", "thursday"),
+        ("xriday", "friday"),
+        ("xaturday", "saturday"),
+        ("xeek", "week"),
+        ("xonth", "month"),
+        ("xear", "year"),
+    ] {
+        let s = p(&format!("x {typo}")).suggestions;
+        assert!(
+            s.iter().any(|c| c.word == typo && c.suggestion == keyword),
+            "{typo} -> {keyword}"
+        );
+    }
+
+    // Exact keywords are the words themselves, not near-misses.
+    assert!(p("x today").suggestions.is_empty());
+    assert!(p("x weekdays").suggestions.is_empty());
+    // Words under 4 letters would light up almost everything within distance 2.
+    assert!(p("x at xon").suggestions.iter().all(|c| c.word != "xon"));
+    // Non-letter words (digits, punctuation) are skipped; the word stays in the subject.
+    assert!(p("x 12345").suggestions.is_empty());
+    let r = p("call xoday!");
+    assert_eq!(r.subject, "call xoday!");
+    assert!(r.suggestions.iter().all(|c| c.word != "xoday!"));
+}
