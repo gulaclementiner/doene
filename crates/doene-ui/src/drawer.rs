@@ -192,6 +192,45 @@ pub fn apply_step(service: &Service, task_id: &str, edit: StepEdit, locale: &str
     r.map_err(|e| error_message(&e, locale))
 }
 
+/// One tag action from the drawer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TagEdit {
+    /// Raw input; normalised like Gör't (lowercase, no `#`/`@`, spaces to `-`).
+    Add(String),
+    Remove(String),
+}
+
+/// The task's tags without `#`, sorted.
+pub fn tag_names(service: &Service, task_id: &str) -> Vec<String> {
+    service.task(task_id).map(|h| h.tags.iter().map(|t| t.as_str().to_owned()).collect()).unwrap_or_default()
+}
+
+/// Tags in use on any task and not yet on `task_id`, for the add-tag suggestions.
+pub fn tag_suggestions(service: &Service, task_id: &str) -> Vec<String> {
+    let have = tag_names(service, task_id);
+    let mut all: Vec<String> = service
+        .all_tasks()
+        .unwrap_or_default()
+        .iter()
+        .flat_map(|h| h.tags.iter().map(|t| t.as_str().to_owned()))
+        .filter(|t| !have.contains(t))
+        .collect();
+    all.sort();
+    all.dedup();
+    all
+}
+
+/// Apply a tag action through the service (logged, undoable via update).
+pub fn apply_tag(service: &Service, task_id: &str, edit: TagEdit, locale: &str) -> Result<(), String> {
+    let mut tags = tag_names(service, task_id);
+    match edit {
+        TagEdit::Add(raw) => tags.push(raw),
+        TagEdit::Remove(t) => tags.retain(|x| *x != t),
+    }
+    let patch = TaskPatch { tags: Some(tags), ..Default::default() };
+    service.update_task(task_id, patch).map(|_| ()).map_err(|e| error_message(&e, locale))
+}
+
 /// A step as shown in the drawer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StepRow {
@@ -317,6 +356,24 @@ mod tests {
 
     fn task(s: &Service) -> String {
         s.quick_add("write report", None, true).unwrap().task.id
+    }
+
+    #[test]
+    fn tags_add_normalise_remove_and_undo() {
+        let (s, _d) = svc();
+        let id = task(&s);
+        apply_tag(&s, &id, TagEdit::Add("  #Home Office ".into()), "en").unwrap();
+        apply_tag(&s, &id, TagEdit::Add("home-office".into()), "en").unwrap();
+        apply_tag(&s, &id, TagEdit::Add("@Work".into()), "en").unwrap();
+        apply_tag(&s, &id, TagEdit::Add("   ".into()), "en").unwrap();
+        assert_eq!(tag_names(&s, &id), ["home-office", "work"]);
+        let other = s.quick_add("other", None, true).unwrap().task.id;
+        assert_eq!(tag_suggestions(&s, &other), ["home-office", "work"]);
+        assert!(tag_suggestions(&s, &id).is_empty());
+        apply_tag(&s, &id, TagEdit::Remove("work".into()), "en").unwrap();
+        assert_eq!(tag_names(&s, &id), ["home-office"]);
+        s.undo().unwrap();
+        assert_eq!(tag_names(&s, &id), ["home-office", "work"]);
     }
 
     #[test]
