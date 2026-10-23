@@ -114,7 +114,7 @@ fn deleting_a_task_cascades_steps_and_tags() {
         },
     )
     .expect("step");
-    tasks::delete_tasks(store.conn(), &[task.id.clone()]).expect("delete");
+    tasks::delete_tasks(store.conn(), std::slice::from_ref(&task.id)).expect("delete");
     let count = |sql: &str| -> i64 { store.conn().query_row(sql, [], |r| r.get(0)).unwrap() };
     assert_eq!(count("SELECT COUNT(*) FROM steps"), 0);
     assert_eq!(count("SELECT COUNT(*) FROM task_tags"), 0);

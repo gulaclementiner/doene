@@ -6,7 +6,7 @@ use doene_core::entities::{HydratedTask, Importance, Step, Task, TaskStatus};
 use doene_core::search::{score, search_tasks};
 
 /// Gör't's `T` helper: an open task with the given subject.
-fn T(subject: &str) -> HydratedTask {
+fn t(subject: &str) -> HydratedTask {
     t_with(subject, None, &[], TaskStatus::Open)
 }
 
@@ -48,14 +48,14 @@ fn t_with(subject: &str, body: Option<&str>, steps: &[&str], status: TaskStatus)
 
 #[test]
 fn search_score_exact_tiers() {
-    assert_eq!(score(&T("Buy milk now"), &["milk".into()]), 6, "whole word");
+    assert_eq!(score(&t("Buy milk now"), &["milk".into()]), 6, "whole word");
     assert_eq!(
-        score(&T("milkshake time"), &["milk".into()]),
+        score(&t("milkshake time"), &["milk".into()]),
         5,
         "subject prefix"
     );
-    assert_eq!(score(&T("a milkshake"), &["milk".into()]), 4, "word prefix");
-    assert_eq!(score(&T("almilk"), &["milk".into()]), 3, "substring");
+    assert_eq!(score(&t("a milkshake"), &["milk".into()]), 4, "word prefix");
+    assert_eq!(score(&t("almilk"), &["milk".into()]), 3, "substring");
     assert_eq!(
         score(
             &t_with("x", None, &["get MILK"], TaskStatus::Open),
@@ -72,7 +72,7 @@ fn search_score_exact_tiers() {
         1,
         "body"
     );
-    assert_eq!(score(&T("x"), &["milk".into()]), 0);
+    assert_eq!(score(&t("x"), &["milk".into()]), 0);
     assert_eq!(
         score(
             &t_with("milk", Some("zz"), &[], TaskStatus::Open),
@@ -82,16 +82,16 @@ fn search_score_exact_tiers() {
         "sums"
     );
     assert_eq!(
-        score(&T("milk"), &["milk".into(), "zz".into()]),
+        score(&t("milk"), &["milk".into(), "zz".into()]),
         0,
         "all words must match"
     );
     assert_eq!(
-        score(&T("hello, world"), &["world".into()]),
+        score(&t("hello, world"), &["world".into()]),
         6,
         "punctuation splits words"
     );
-    assert_eq!(score(&T("a-milk"), &["milk".into()]), 6);
+    assert_eq!(score(&t("a-milk"), &["milk".into()]), 6);
     // Gör't's `score({subject:'x'}, ['x'])` — missing steps/body ok.
     let bare = HydratedTask::bare(Task {
         id: String::new(),
@@ -119,11 +119,11 @@ fn search_score_exact_tiers() {
         2
     );
     assert_eq!(
-        score(&T("The Quick"), &["quick".into()]),
+        score(&t("The Quick"), &["quick".into()]),
         6,
         "case-insensitive subject"
     );
-    assert_eq!(score(&T("quick"), &["quick".into()]), 6);
+    assert_eq!(score(&t("quick"), &["quick".into()]), 6);
     assert_eq!(
         score(
             &t_with("x", Some("QUICK"), &[], TaskStatus::Open),
@@ -148,7 +148,7 @@ fn search_score_exact_tiers() {
 
 #[test]
 fn search_empty_blank_query_returns_nothing_and_is_case_space_tolerant() {
-    let ts = [T("alpha")];
+    let ts = [t("alpha")];
     assert_eq!(search_tasks(&ts, "", 50).len(), 0);
     assert_eq!(search_tasks(&ts, "   ", 50).len(), 0);
     // Gör't's `searchTasks(ts, null)` case: a null query is not representable
@@ -177,8 +177,8 @@ fn search_empty_blank_query_returns_nothing_and_is_case_space_tolerant() {
 
 #[test]
 fn search_ranks_by_score_then_open_before_completed_then_subject_and_honours_limit() {
-    let low = T("xmilk");
-    let high = T("milk");
+    let low = t("xmilk");
+    let high = t("milk");
     assert_eq!(
         search_tasks(&[low.clone(), high.clone()], "milk", 50)
             .iter()
@@ -195,7 +195,7 @@ fn search_ranks_by_score_then_open_before_completed_then_subject_and_honours_lim
     );
 
     let done = t_with("milk", None, &[], TaskStatus::Completed);
-    let open = T("milk");
+    let open = t("milk");
     for input in [[done.clone(), open.clone()], [open.clone(), done.clone()]] {
         assert_eq!(
             search_tasks(&input, "milk", 50)
@@ -206,8 +206,8 @@ fn search_ranks_by_score_then_open_before_completed_then_subject_and_honours_lim
         );
     }
 
-    let b = T("milk b");
-    let a = T("milk a");
+    let b = t("milk b");
+    let a = t("milk a");
     for input in [[b.clone(), a.clone()], [a.clone(), b.clone()]] {
         assert_eq!(
             search_tasks(&input, "milk", 50)
@@ -222,7 +222,7 @@ fn search_ranks_by_score_then_open_before_completed_then_subject_and_honours_lim
     let mixed = [low, t_with("milk", None, &[], TaskStatus::Completed)];
     assert_eq!(search_tasks(&mixed, "milk", 50)[0].task.subject, "milk");
 
-    let many: Vec<HydratedTask> = (0..10).map(|i| T(&format!("milk {i}"))).collect();
+    let many: Vec<HydratedTask> = (0..10).map(|i| t(&format!("milk {i}"))).collect();
     assert_eq!(search_tasks(&many, "milk", 3).len(), 3);
     assert_eq!(search_tasks(&many, "milk", 50).len(), 10);
     assert_eq!(search_tasks(&many, "milk", 0).len(), 0);

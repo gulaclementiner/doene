@@ -139,6 +139,7 @@ pub struct TrashItem {
 
 /// What a restore brought back.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::large_enum_variant)] // short-lived return value; boxing would churn every caller
 pub enum Restored {
     Task(HydratedTask),
     View { id: String },
@@ -323,10 +324,10 @@ fn check_parent(conn: &Connection, task_id: Option<&str>, parent: Option<&str>) 
     if tasks::task(conn, parent)?.is_none() {
         return Err(not_found("what.parentTask", "parent task"));
     }
-    if let Some(id) = task_id {
-        if !tree::can_nest(id, parent, &tasks::parent_map(conn)?) {
-            return Err(coded("error.subtaskCycle", "subtasks cannot form a cycle"));
-        }
+    if let Some(id) = task_id
+        && !tree::can_nest(id, parent, &tasks::parent_map(conn)?)
+    {
+        return Err(coded("error.subtaskCycle", "subtasks cannot form a cycle"));
     }
     Ok(())
 }
@@ -599,10 +600,10 @@ fn update_in(conn: &Connection, ctx: &Ctx, id: &str, p: TaskPatch) -> Res<Update
     if let Some(tags) = &p.tags {
         set_tags_logged(conn, ctx, id, tags)?;
     }
-    if let Some(status) = p.status {
-        if status != cur.status {
-            return set_status(conn, ctx, id, status);
-        }
+    if let Some(status) = p.status
+        && status != cur.status
+    {
+        return set_status(conn, ctx, id, status);
     }
     // A change not covered by a field log line (body, position, recurrence, focus) still
     // leaves a trace: the activity log records every mutation.
@@ -947,20 +948,20 @@ impl Service {
                 (Some(b), None) => b + 1.0,
                 (Some(b), Some(a)) => (b + a) / 2.0,
             };
-            if let (Some(b), Some(a)) = (before, after) {
-                if !(pos > b && pos < a) {
-                    // No gap left between neighbours: renumber 1..n with the task in its slot.
-                    let mut ordered: Vec<&str> = sib.iter().map(|s| s.0.as_str()).collect();
-                    ordered.insert(at, id);
-                    for (k, sid) in ordered.iter().enumerate() {
-                        if *sid != id {
-                            let mut s = need(c, sid)?.task;
-                            s.position = (k + 1) as f64;
-                            tasks::update_task(c, &s)?;
-                        }
+            if let (Some(b), Some(a)) = (before, after)
+                && !(pos > b && pos < a)
+            {
+                // No gap left between neighbours: renumber 1..n with the task in its slot.
+                let mut ordered: Vec<&str> = sib.iter().map(|s| s.0.as_str()).collect();
+                ordered.insert(at, id);
+                for (k, sid) in ordered.iter().enumerate() {
+                    if *sid != id {
+                        let mut s = need(c, sid)?.task;
+                        s.position = (k + 1) as f64;
+                        tasks::update_task(c, &s)?;
                     }
-                    pos = (at + 1) as f64;
                 }
+                pos = (at + 1) as f64;
             }
             if parent_id != cur.parent_id.as_deref() {
                 log(
@@ -1124,10 +1125,10 @@ impl Service {
                 .map(|h| h.task.id.clone())
                 .ok_or_else(|| not_found("what.trashEntry", "trash entry"))?;
             // A parent that no longer exists is dropped: the task returns at top level.
-            if let Some(p) = items[0].task.parent_id.clone() {
-                if tasks::task(c, &p)?.is_none() {
-                    items[0].task.parent_id = None;
-                }
+            if let Some(p) = items[0].task.parent_id.clone()
+                && tasks::task(c, &p)?.is_none()
+            {
+                items[0].task.parent_id = None;
             }
             for h in &items {
                 tasks::insert_task(c, &h.task)?;

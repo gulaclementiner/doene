@@ -815,10 +815,10 @@ impl DöneApp {
             if resp.clicked() {
                 open = Some(r.id.clone());
             }
-            if resp.drag_stopped() {
-                if let Some(p) = ui.input(|i| i.pointer.interact_pos()) {
-                    moved = Some((i, p.y));
-                }
+            if resp.drag_stopped()
+                && let Some(p) = ui.input(|i| i.pointer.interact_pos())
+            {
+                moved = Some((i, p.y));
             }
         }
         if let Some(id) = open {
@@ -1535,19 +1535,18 @@ impl eframe::App for DöneApp {
             };
             ui.horizontal(|ui| {
                 ui.heading(title);
-                if let Some(id) = self.view.clone() {
-                    if ui
+                if let Some(id) = self.view.clone()
+                    && ui
                         .small_button("✎")
                         .on_hover_text(self.t("viewForm.editView"))
                         .clicked()
-                    {
-                        self.open_form(
-                            self.views
-                                .iter()
-                                .find(|v| v.view.id == id)
-                                .map(ViewDraft::from_view),
-                        );
-                    }
+                {
+                    self.open_form(
+                        self.views
+                            .iter()
+                            .find(|v| v.view.id == id)
+                            .map(ViewDraft::from_view),
+                    );
                 }
             });
             if self.view.is_none() && self.list == SmartList::MyDay {
@@ -1649,7 +1648,7 @@ impl eframe::App for DöneApp {
                         let tree = crate::reorder::Tree::load(&self.service);
                         let unnest_zone = ui.max_rect().bottom() - 40.0;
                         let is_nested = tree.parents.get(&id).is_some_and(|p| p.is_some());
-                        let in_unnest = is_nested && ptr.is_some_and(|p| p.y as f32 >= unnest_zone);
+                        let in_unnest = is_nested && ptr.is_some_and(|p| p.y >= unnest_zone);
                         let plan = ptr.and_then(|p| {
                             crate::dragdrop::plan_drop(&tree, &rects, &id, p.y as f64, in_unnest)
                         });
