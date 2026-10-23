@@ -389,3 +389,14 @@ fn failed_mutation_records_no_undo() {
     assert!(f.svc.delete_task("nope").is_err());
     assert_eq!(f.svc.undo_peek(), None);
 }
+
+#[test]
+fn drawer_pref_persists_and_validates_scope() {
+    let f = fixture();
+    assert_eq!(f.svc.pref("drawer:abc").unwrap(), None);
+    f.svc.set_pref("drawer:abc", r#"["notes","tags"]"#).unwrap();
+    f.svc.set_pref("drawer:abc", r#"["tags","notes"]"#).unwrap();
+    assert_eq!(f.svc.pref("drawer:abc").unwrap().as_deref(), Some(r#"["tags","notes"]"#));
+    assert_eq!(f.svc.set_pref("other", "x").unwrap_err().code(), Some("error.unknownPrefScope"));
+    assert_eq!(f.svc.set_pref("drawer:abc", " ").unwrap_err().code(), Some("error.prefValueRequired"));
+}

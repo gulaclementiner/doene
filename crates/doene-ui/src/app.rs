@@ -8,6 +8,9 @@ use doene_service::Service;
 use eframe::egui::{self, Color32, RichText};
 use serde_json::json;
 
+use crate::drawer::{
+    ActivityLine, FieldEdit, RecurrenceDraft, activity_lines, apply_edit, load_order, move_section,
+};
 use crate::model::{
     TaskRow, Theme, Toasts, Toggled, TrashRow, delete_with_toast, list_rows, toggle_complete, trash_rows,
     undo_message,
@@ -31,6 +34,21 @@ pub struct DöneApp {
     trash: Vec<TrashRow>,
     rows: Vec<TaskRow>,
     applied_theme: Option<Theme>,
+    drawer: Option<Drawer>,
+}
+
+/// Open drawer state: edit buffers for one task.
+struct Drawer {
+    id: String,
+    subject: String,
+    notes: String,
+    due: String,
+    reminder: String,
+    important: bool,
+    rec: RecurrenceDraft,
+    order: Vec<String>,
+    activity: Vec<ActivityLine>,
+    customizing: bool,
 }
 
 fn nav_key(l: SmartList) -> &'static str {
@@ -60,6 +78,7 @@ impl DöneApp {
             trash: vec![],
             rows: vec![],
             applied_theme: None,
+            drawer: None,
         };
         app.reload();
         app
@@ -82,8 +101,53 @@ impl DöneApp {
                 let settings = SmartSettings { focus_mode: s.focus_mode, ..Default::default() };
                 self.trash = self.service.trash().map(|t| trash_rows(&t, &self.locale)).unwrap_or_default();
                 self.rows = list_rows(self.list, &tasks, self.service.today(), settings, &self.locale);
+                if let Some(id) = self.drawer.as_ref().map(|d| d.id.clone()) {
+                    self.open_drawer(&id);
+                }
             }
             Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    /// (Re)load the drawer buffers for a task; closes the drawer if it is gone.
+    fn open_drawer(&mut self, id: &str) {
+        let Ok(h) = self.service.task(id) else {
+            self.drawer = None;
+            return;
+        };
+        let t = &h.task;
+        self.drawer = Some(Drawer {
+            id: id.to_owned(),
+            subject: t.subject.clone(),
+            notes: t.body.clone().unwrap_or_default(),
+            due: t.due_date.map(|d| d.to_string()).unwrap_or_default(),
+            reminder: t.reminder_at.clone().unwrap_or_default().replace('T', " "),
+            important: t.importance == doene_core::Importance::High,
+            rec: RecurrenceDraft::from_rule(t.recurrence.as_ref()),
+            order: load_order(&self.service, id),
+            activity: activity_lines(&self.service, id),
+            customizing: self.drawer.as_ref().is_some_and(|d| d.id == id && d.customizing),
+        });
+    }
+
+    fn edit_field(&mut self, edit: FieldEdit) {
+        let Some(id) = self.drawer.as_ref().map(|d| d.id.clone()) else { return };
+        match apply_edit(&self.service, &id, edit, &self.locale) {
+            Ok(()) => self.error = None,
+            Err(m) => self.error = Some(m),
+        }
+        self.reload();
+    }
+
+    fn move_drawer_section(&mut self, index: usize, delta: i32) {
+        let Some(id) = self.drawer.as_ref().map(|d| d.id.clone()) else { return };
+        match move_section(&self.service, &id, index, delta) {
+            Ok(order) => {
+                if let Some(d) = &mut self.drawer {
+                    d.order = order;
+                }
+            }
+            Err(e) => self.error = Some(crate::drawer::error_message(&e, &self.locale)),
         }
     }
 
@@ -256,6 +320,145 @@ impl DöneApp {
     }
 }
 
+impl DöneApp {
+    fn drawer_ui(&mut self, ui: &mut egui::Ui) {
+        let locale = self.locale.clone();
+        let activity_title = self.t("drawer.activity");
+        let Some(d) = self.drawer.as_mut() else { return };
+        let mut edit = None;
+        let mut close = false;
+        let mut move_sec = None;
+        let weekday_keys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+        let t = |k: &str| tr(k, &HashMap::new(), Some(&locale));
+        ui.horizontal(|ui| {
+            ui.heading(&d.subject);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button(t("drawer.close")).on_hover_text(t("drawer.closeTip")).clicked() {
+                    close = true;
+                }
+                if ui.selectable_label(d.customizing, "⇅").on_hover_text(t("drawer.reorderSections")).clicked() {
+                    d.customizing = !d.customizing;
+                }
+            });
+        });
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            if d.customizing {
+                for (i, sec) in d.order.clone().iter().enumerate() {
+                    let p = HashMap::from([("section".to_owned(), Some(t(&format!("section.{sec}"))))]);
+                    ui.horizontal(|ui| {
+                        ui.label(t(&format!("section.{sec}")));
+                        if ui.small_button("▲").on_hover_text(tr("layout.moveUp", &p, Some(&locale))).clicked() {
+                            move_sec = Some((i, -1));
+                        }
+                        if ui.small_button("▼").on_hover_text(tr("layout.moveDown", &p, Some(&locale))).clicked() {
+                            move_sec = Some((i, 1));
+                        }
+                    });
+                }
+                ui.separator();
+            }
+            for sec in d.order.clone() {
+                match sec.as_str() {
+                    "customize" => {
+                        ui.label(RichText::new(t("section.customize")).strong());
+                        if ui.checkbox(&mut d.important, t("task.markImportant")).changed() {
+                            edit = Some(FieldEdit::Important(d.important));
+                        }
+                        ui.horizontal(|ui| {
+                            ui.label(t("drawer.dueDate"));
+                            let r = ui.add(egui::TextEdit::singleline(&mut d.due).hint_text("YYYY-MM-DD").desired_width(110.0));
+                            if r.lost_focus() {
+                                edit = Some(FieldEdit::Due(d.due.clone()));
+                            }
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label(t("drawer.reminder"));
+                            let r = ui.add(egui::TextEdit::singleline(&mut d.reminder).hint_text("YYYY-MM-DD HH:MM").desired_width(150.0));
+                            if r.lost_focus() {
+                                edit = Some(FieldEdit::Reminder(d.reminder.clone()));
+                            }
+                        });
+                        let rec_label = |k: Option<&str>| match k {
+                            None => t("drawer.repeatNone"),
+                            Some("custom") => t("recurrence.customEvery").replace(" {n} {unit}", "…"),
+                            Some(k) => t(&format!("recurrence.{k}")),
+                        };
+                        let mut rec_changed = false;
+                        ui.horizontal(|ui| {
+                            ui.label(t("drawer.repeat"));
+                            egui::ComboBox::from_id_salt("rec_kind")
+                                .selected_text(rec_label(d.rec.kind))
+                                .show_ui(ui, |ui| {
+                                    rec_changed |= ui.selectable_value(&mut d.rec.kind, None, rec_label(None)).changed();
+                                    for k in doene_core::recurrence::TYPES {
+                                        rec_changed |= ui.selectable_value(&mut d.rec.kind, Some(k), rec_label(Some(k))).changed();
+                                    }
+                                });
+                        });
+                        if d.rec.kind == Some("custom") {
+                            ui.horizontal(|ui| {
+                                ui.label(t("recurrence.customEvery").split(" {n}").next().unwrap_or("").to_owned());
+                                rec_changed |= ui.add(egui::DragValue::new(&mut d.rec.interval).range(1..=999)).changed();
+                                egui::ComboBox::from_id_salt("rec_unit").selected_text(t(&format!("recurrence.{}", d.rec.unit))).show_ui(ui, |ui| {
+                                    for u in ["day", "week", "month", "year"] {
+                                        rec_changed |= ui.selectable_value(&mut d.rec.unit, u, t(&format!("recurrence.{u}"))).changed();
+                                    }
+                                });
+                            });
+                            if d.rec.unit == "week" {
+                                ui.horizontal(|ui| {
+                                    for (dow, k) in [1u8, 2, 3, 4, 5, 6, 0].into_iter().map(|n| (n, weekday_keys[n as usize])) {
+                                        let on = d.rec.days.contains(&dow);
+                                        if ui.selectable_label(on, t(&format!("weekday.{k}"))).clicked() {
+                                            d.rec.toggle_day(dow);
+                                            rec_changed = true;
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                        if rec_changed {
+                            edit = Some(FieldEdit::Recurrence(d.rec.clone()));
+                        }
+                    }
+                    "notes" => {
+                        ui.label(RichText::new(t("section.notes")).strong());
+                        let r = ui.add(
+                            egui::TextEdit::multiline(&mut d.notes)
+                                .hint_text(t("drawer.notesPlaceholder"))
+                                .desired_width(f32::INFINITY),
+                        );
+                        if r.lost_focus() {
+                            edit = Some(FieldEdit::Notes(d.notes.clone()));
+                        }
+                    }
+                    // Tags, subtasks, steps, references and completion arrive in later tickets.
+                    _ => {}
+                }
+                ui.add_space(6.0);
+            }
+            ui.separator();
+            ui.label(RichText::new(activity_title.clone()).strong());
+            for a in &d.activity {
+                let line = match &a.detail {
+                    Some(x) => format!("{}  {} · {}", a.at, a.action, x),
+                    None => format!("{}  {}", a.at, a.action),
+                };
+                ui.label(RichText::new(line).small().weak());
+            }
+        });
+        if close {
+            self.drawer = None;
+        }
+        if let Some((i, delta)) = move_sec {
+            self.move_drawer_section(i, delta);
+        }
+        if let Some(e) = edit {
+            self.edit_field(e);
+        }
+    }
+}
+
 impl eframe::App for DöneApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
@@ -306,6 +509,14 @@ impl eframe::App for DöneApp {
             });
         });
 
+        if self.drawer.is_some() && !self.show_trash {
+            if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !ctx.egui_wants_keyboard_input() {
+                self.drawer = None;
+            } else {
+                egui::Panel::right("drawer").default_size(340.0).show(ui, |ui| self.drawer_ui(ui));
+            }
+        }
+
         egui::CentralPanel::default().show(ui, |ui| {
             if self.show_trash {
                 self.trash_ui(ui);
@@ -330,6 +541,7 @@ impl eframe::App for DöneApp {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 let mut clicked = None;
                 let mut deleted = None;
+                let mut opened = None;
                 for r in &self.rows {
                     ui.horizontal(|ui| {
                         let mut done = r.completed;
@@ -342,7 +554,9 @@ impl eframe::App for DöneApp {
                         if r.completed {
                             subject = subject.strikethrough().weak();
                         }
-                        ui.label(subject);
+                        if ui.add(egui::Label::new(subject).sense(egui::Sense::click())).clicked() {
+                            opened = Some(r.id.clone());
+                        }
                         if r.important {
                             ui.label(RichText::new("★").color(AMBER));
                         }
@@ -365,6 +579,9 @@ impl eframe::App for DöneApp {
                 }
                 if let Some(id) = deleted {
                     self.delete(&id);
+                }
+                if let Some(id) = opened {
+                    self.open_drawer(&id);
                 }
             });
         });
