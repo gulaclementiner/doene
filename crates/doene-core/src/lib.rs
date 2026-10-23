@@ -12,6 +12,7 @@ pub mod errors;
 pub mod i18n;
 pub mod labels;
 pub mod recurrence;
+pub mod smartlists;
 pub mod tree;
 
 pub use agenda::{
@@ -29,4 +30,5 @@ pub use entities::{
 };
 pub use errors::CodedError;
 pub use recurrence::{RawRecurrence, TYPES, next_date, next_on_or_after, validate};
+pub use smartlists::{SMART, SmartList, SmartSettings, smart_tasks, sort_tasks, visible_order};
 pub use tree::ParentMap;

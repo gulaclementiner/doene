@@ -226,6 +226,7 @@ pub fn agenda<'a>(tasks: &'a [Task], opts: &AgendaOptions) -> Result<Agenda<'a>,
             for t in &matched {
                 used.insert(t.id.as_str());
             }
+            let matched = crate::smartlists::sort_tasks(&matched, opts.sort, false);
             sections.last_mut().expect("a section exists after the push above").groups.push(Group {
                 key: group_key,
                 tasks: matched,
