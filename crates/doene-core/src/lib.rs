@@ -9,6 +9,7 @@ pub mod entities;
 pub mod errors;
 pub mod i18n;
 pub mod labels;
+pub mod nlp;
 pub mod recurrence;
 pub mod tree;
 
@@ -19,5 +20,6 @@ pub use entities::{
     TaskStatus, TrashEntry, TrashKind, View, Weekday,
 };
 pub use errors::CodedError;
+pub use nlp::{ParsedQuickAdd, ParseOptions, parse_quick_add};
 pub use recurrence::{RawRecurrence, TYPES, next_date, next_on_or_after, validate};
 pub use tree::ParentMap;
