@@ -103,6 +103,29 @@ pub struct Step {
     pub position: f64,
 }
 
+/// A task hydrated with its child rows (`task_tags`, `steps`) — the shape
+/// the pure read-model rules (views, search, smartlists) consume. Storage
+/// builds it from DB rows; Gör't's equivalent is the store's `#hydrate` output.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HydratedTask {
+    pub task: Task,
+    /// Tags from `task_tags`, in stored order.
+    pub tags: Vec<Tag>,
+    /// Steps from `steps`, in stored (position) order.
+    pub steps: Vec<Step>,
+}
+
+impl HydratedTask {
+    /// A task with no child rows.
+    pub fn bare(task: Task) -> Self {
+        Self {
+            task,
+            tags: vec![],
+            steps: vec![],
+        }
+    }
+}
+
 /// How a view's tags combine (`views.match_mode`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MatchMode {
