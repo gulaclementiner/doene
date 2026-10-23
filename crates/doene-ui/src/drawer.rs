@@ -1,0 +1,309 @@
+//! Task drawer view-model: field edits through the service, the recurrence
+//! editor draft, section ordering (prefs) and the activity view. No egui types.
+
+use std::collections::HashMap;
+
+use doene_core::i18n::tr;
+use doene_core::recurrence::{RawRecurrence, TYPES};
+use doene_core::{Date, Importance, RecurrenceRule};
+use doene_service::{Service, ServiceError, TaskPatch};
+
+/// Drawer sections in default order (ids match the `section.*` locale keys).
+pub const SECTIONS: [&str; 8] =
+    ["customize", "tags", "subtasks", "steps", "refs", "referencedBy", "notes", "completion"];
+
+/// The pref scope holding a task's section order.
+pub fn pref_scope(task_id: &str) -> String {
+    format!("drawer:{task_id}")
+}
+
+/// Parse a stored section order: unknown/duplicate ids dropped, missing ones
+/// appended in default order. Bad JSON yields the default order.
+pub fn parse_order(stored: Option<&str>) -> Vec<String> {
+    let saved: Vec<String> = stored.and_then(|s| serde_json::from_str(s).ok()).unwrap_or_default();
+    let mut out: Vec<String> = vec![];
+    for id in saved.iter().map(String::as_str).chain(SECTIONS) {
+        if SECTIONS.contains(&id) && !out.iter().any(|o| o == id) {
+            out.push(id.to_owned());
+        }
+    }
+    out
+}
+
+/// Load a task's section order from prefs.
+pub fn load_order(service: &Service, task_id: &str) -> Vec<String> {
+    parse_order(service.pref(&pref_scope(task_id)).ok().flatten().as_deref())
+}
+
+/// Move the section at `index` by `delta` (clamped) and persist; returns the new order.
+pub fn move_section(
+    service: &Service,
+    task_id: &str,
+    index: usize,
+    delta: i32,
+) -> Result<Vec<String>, ServiceError> {
+    let mut order = load_order(service, task_id);
+    let to = (index as i32 + delta).clamp(0, order.len() as i32 - 1) as usize;
+    if index < order.len() && to != index {
+        let s = order.remove(index);
+        order.insert(to, s);
+        service.set_pref(&pref_scope(task_id), &serde_json::to_string(&order).unwrap_or_default())?;
+    }
+    Ok(order)
+}
+
+/// Editable recurrence state (the editor's draft).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecurrenceDraft {
+    /// `None` = does not repeat; else one of [`TYPES`].
+    pub kind: Option<&'static str>,
+    pub interval: u32,
+    /// `day | week | month | year` (custom only).
+    pub unit: &'static str,
+    /// Custom weekly weekday set, dow 0 = Sunday … 6.
+    pub days: Vec<u8>,
+}
+
+impl Default for RecurrenceDraft {
+    fn default() -> Self {
+        Self { kind: None, interval: 1, unit: "week", days: vec![] }
+    }
+}
+
+const UNITS: [&str; 4] = ["day", "week", "month", "year"];
+
+impl RecurrenceDraft {
+    pub fn from_rule(rule: Option<&RecurrenceRule>) -> Self {
+        let Some(r) = rule else { return Self::default() };
+        let raw = RawRecurrence::from(r.clone());
+        let kind = TYPES.iter().copied().find(|t| Some(*t) == raw.kind.as_deref());
+        let unit = UNITS.iter().copied().find(|u| Some(*u) == raw.unit.as_deref()).unwrap_or("week");
+        let mut days: Vec<u8> = raw.days.unwrap_or_default().iter().filter_map(|d| d.parse().ok()).collect();
+        days.sort_unstable();
+        Self { kind, interval: raw.interval.map_or(1, |i| i as u32), unit, days }
+    }
+
+    /// Toggle a weekday in the custom set.
+    pub fn toggle_day(&mut self, dow: u8) {
+        match self.days.iter().position(|d| *d == dow) {
+            Some(i) => {
+                self.days.remove(i);
+            }
+            None => {
+                self.days.push(dow);
+                self.days.sort_unstable();
+            }
+        }
+    }
+
+    /// The service value: `None` = clear.
+    pub fn to_raw(&self) -> Option<RawRecurrence> {
+        let kind = self.kind?;
+        let custom = kind == "custom";
+        Some(RawRecurrence {
+            kind: Some(kind.to_owned()),
+            interval: custom.then_some(f64::from(self.interval.max(1))),
+            unit: custom.then(|| self.unit.to_owned()),
+            days: (custom && self.unit == "week" && !self.days.is_empty())
+                .then(|| self.days.iter().map(u8::to_string).collect()),
+        })
+    }
+}
+
+/// Localised message for a service error (by code and params).
+pub fn error_message(e: &ServiceError, locale: &str) -> String {
+    match e {
+        ServiceError::Coded(c) => {
+            let p: HashMap<String, Option<String>> =
+                c.params.iter().map(|(k, v)| ((*k).to_owned(), Some(v.clone()))).collect();
+            tr(c.code, &p, Some(locale))
+        }
+        other => other.to_string(),
+    }
+}
+
+/// One field edit from the drawer.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FieldEdit {
+    /// Empty text clears.
+    Notes(String),
+    /// `YYYY-MM-DD`; empty clears.
+    Due(String),
+    /// `YYYY-MM-DDTHH:MM` (or with a space); empty clears.
+    Reminder(String),
+    Important(bool),
+    Recurrence(RecurrenceDraft),
+}
+
+fn valid_reminder(s: &str) -> Option<String> {
+    let s = s.trim().replacen(' ', "T", 1);
+    let (d, t) = s.split_once('T')?;
+    Date::parse(d).ok()?;
+    let (h, m) = t.split_once(':')?;
+    let ok = h.len() == 2 && m.len() == 2 && h.parse::<u8>().is_ok_and(|h| h < 24) && m.parse::<u8>().is_ok_and(|m| m < 60);
+    ok.then_some(s)
+}
+
+/// Apply a field edit through the service; `Err` is a localised message.
+pub fn apply_edit(service: &Service, id: &str, edit: FieldEdit, locale: &str) -> Result<(), String> {
+    let bad = |key: &str| tr(key, &HashMap::new(), Some(locale));
+    let mut patch = TaskPatch::default();
+    match edit {
+        FieldEdit::Notes(s) => patch.body = Some(if s.trim().is_empty() { None } else { Some(s) }),
+        FieldEdit::Due(s) if s.trim().is_empty() => patch.due_date = Some(None),
+        FieldEdit::Due(s) => {
+            patch.due_date = Some(Some(Date::parse(s.trim()).map_err(|_| bad("error.invalidDate"))?))
+        }
+        FieldEdit::Reminder(s) if s.trim().is_empty() => patch.reminder_at = Some(None),
+        FieldEdit::Reminder(s) => {
+            patch.reminder_at = Some(Some(valid_reminder(&s).ok_or_else(|| bad("error.invalidReminder"))?))
+        }
+        FieldEdit::Important(on) => {
+            patch.importance = Some(if on { Importance::High } else { Importance::Normal })
+        }
+        FieldEdit::Recurrence(d) => patch.recurrence = Some(d.to_raw()),
+    }
+    service.update_task(id, patch).map(|_| ()).map_err(|e| error_message(&e, locale))
+}
+
+/// One activity line: local-ish timestamp, action, detail.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActivityLine {
+    /// `YYYY-MM-DD HH:MM` (UTC).
+    pub at: String,
+    pub action: String,
+    pub detail: Option<String>,
+}
+
+/// The task's activity log, newest first.
+pub fn activity_lines(service: &Service, id: &str) -> Vec<ActivityLine> {
+    service
+        .activity(id)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|a| ActivityLine {
+            at: a.at.get(..16).unwrap_or(&a.at).replace('T', " "),
+            action: a.action,
+            detail: a.detail,
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use doene_storage::Storage;
+
+    fn svc() -> (Service, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Storage::open(&dir.path().join("d.db")).unwrap();
+        (Service::with_clock(storage, Box::new(|| "2025-03-10T09:00:00.000Z".into())), dir)
+    }
+
+    fn task(s: &Service) -> String {
+        s.quick_add("write report", None, true).unwrap().task.id
+    }
+
+    #[test]
+    fn fields_persist_and_clear() {
+        let (s, _d) = svc();
+        let id = task(&s);
+        apply_edit(&s, &id, FieldEdit::Notes("hello".into()), "en").unwrap();
+        apply_edit(&s, &id, FieldEdit::Due("2025-04-01".into()), "en").unwrap();
+        apply_edit(&s, &id, FieldEdit::Reminder("2025-04-01 08:30".into()), "en").unwrap();
+        apply_edit(&s, &id, FieldEdit::Important(true), "en").unwrap();
+        let t = s.task(&id).unwrap().task;
+        assert_eq!(t.body.as_deref(), Some("hello"));
+        assert_eq!(t.due_date, Some(Date::parse("2025-04-01").unwrap()));
+        assert_eq!(t.reminder_at.as_deref(), Some("2025-04-01T08:30"));
+        assert_eq!(t.importance, Importance::High);
+        apply_edit(&s, &id, FieldEdit::Notes("  ".into()), "en").unwrap();
+        apply_edit(&s, &id, FieldEdit::Due("".into()), "en").unwrap();
+        apply_edit(&s, &id, FieldEdit::Reminder("".into()), "en").unwrap();
+        let t = s.task(&id).unwrap().task;
+        assert_eq!((t.body, t.due_date, t.reminder_at), (None, None, None));
+    }
+
+    #[test]
+    fn invalid_input_gives_localised_error_and_changes_nothing() {
+        let (s, _d) = svc();
+        let id = task(&s);
+        assert_eq!(apply_edit(&s, &id, FieldEdit::Due("2025-02-30".into()), "en").unwrap_err(), "invalid date (use YYYY-MM-DD)");
+        assert_eq!(
+            apply_edit(&s, &id, FieldEdit::Reminder("tomorrow".into()), "sv").unwrap_err(),
+            "ogiltig påminnelse (använd ÅÅÅÅ-MM-DD HH:MM)"
+        );
+        assert_eq!(s.task(&id).unwrap().task.due_date, None);
+    }
+
+    #[test]
+    fn edit_is_undoable() {
+        let (s, _d) = svc();
+        let id = task(&s);
+        apply_edit(&s, &id, FieldEdit::Important(true), "en").unwrap();
+        s.undo().unwrap();
+        assert_eq!(s.task(&id).unwrap().task.importance, Importance::Normal);
+    }
+
+    #[test]
+    fn recurrence_editor_covers_all_six_types() {
+        let (s, _d) = svc();
+        let id = task(&s);
+        for kind in ["daily", "weekdays", "weekly", "monthly", "yearly"] {
+            let d = RecurrenceDraft { kind: TYPES.iter().copied().find(|t| *t == kind), ..Default::default() };
+            apply_edit(&s, &id, FieldEdit::Recurrence(d.clone()), "en").unwrap();
+            let got = s.task(&id).unwrap().task.recurrence;
+            assert_eq!(RecurrenceDraft::from_rule(got.as_ref()).kind, Some(d.kind.unwrap()));
+        }
+        // custom: every 2 weeks on Mon + Fri
+        let mut d = RecurrenceDraft { kind: Some("custom"), interval: 2, unit: "week", days: vec![] };
+        d.toggle_day(5);
+        d.toggle_day(1);
+        d.toggle_day(3);
+        d.toggle_day(3);
+        apply_edit(&s, &id, FieldEdit::Recurrence(d.clone()), "en").unwrap();
+        let got = s.task(&id).unwrap().task.recurrence;
+        assert_eq!(RecurrenceDraft::from_rule(got.as_ref()), RecurrenceDraft { days: vec![1, 5], ..d });
+        // custom monthly interval drops weekdays
+        let m = RecurrenceDraft { kind: Some("custom"), interval: 3, unit: "month", days: vec![2] };
+        apply_edit(&s, &id, FieldEdit::Recurrence(m), "en").unwrap();
+        let got = RecurrenceDraft::from_rule(s.task(&id).unwrap().task.recurrence.as_ref());
+        assert_eq!((got.interval, got.unit, got.days.len()), (3, "month", 0));
+        // none clears
+        apply_edit(&s, &id, FieldEdit::Recurrence(RecurrenceDraft::default()), "en").unwrap();
+        assert_eq!(s.task(&id).unwrap().task.recurrence, None);
+    }
+
+    #[test]
+    fn activity_view_lists_field_changes_newest_first() {
+        let (s, _d) = svc();
+        let id = task(&s);
+        apply_edit(&s, &id, FieldEdit::Due("2025-04-01".into()), "en").unwrap();
+        let lines = activity_lines(&s, &id);
+        assert!(lines.len() >= 2);
+        assert_eq!(lines.last().unwrap().action, "created");
+        assert!(lines.iter().any(|l| l.action == "due_date changed" && l.at == "2025-03-10 09:00"));
+    }
+
+    #[test]
+    fn section_order_persists_per_task() {
+        let (s, _d) = svc();
+        let a = task(&s);
+        let b = s.quick_add("other", None, true).unwrap().task.id;
+        assert_eq!(load_order(&s, &a), SECTIONS);
+        let moved = move_section(&s, &a, 6, -6).unwrap();
+        assert_eq!(moved[0], "notes");
+        assert_eq!(load_order(&s, &a)[..2], ["notes", "customize"]);
+        assert_eq!(load_order(&s, &b), SECTIONS);
+        // moving past the edge is a no-op
+        assert_eq!(move_section(&s, &a, 0, -1).unwrap()[0], "notes");
+    }
+
+    #[test]
+    fn stored_order_is_sanitised() {
+        let o = parse_order(Some(r#"["notes","bogus","notes","tags"]"#));
+        assert_eq!(o.len(), SECTIONS.len());
+        assert_eq!(o[..2], ["notes", "tags"]);
+        assert_eq!(parse_order(Some("not json")), SECTIONS);
+    }
+}

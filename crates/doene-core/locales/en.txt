@@ -344,3 +344,5 @@ trash.emptyConfirm=Empty the trash? This cannot be undone.
 undo.done=Undone
 undo.nothing=Nothing to undo
 trash.itemDeleted=Deleted {when}
+error.invalidDate=invalid date (use YYYY-MM-DD)
+error.invalidReminder=invalid reminder (use YYYY-MM-DD HH:MM)

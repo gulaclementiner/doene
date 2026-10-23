@@ -5,6 +5,7 @@
 //! `DöneApp` state and egui rendering (thin, not unit-tested).
 
 mod app;
+pub mod drawer;
 pub mod model;
 
 pub use app::DöneApp;
