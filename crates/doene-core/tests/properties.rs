@@ -4,8 +4,9 @@
 //! ranges.
 
 use doene_core::dates::Date;
-use doene_core::entities::{RecurrenceType, RecurrenceUnit};
+use doene_core::entities::{HydratedTask, Importance, RecurrenceType, RecurrenceUnit, Task, TaskStatus};
 use doene_core::recurrence::{RawRecurrence, next_date, next_on_or_after, validate};
+use doene_core::search::search_tasks;
 use proptest::prelude::*;
 
 /// Gör't's `day` arb: uniform valid calendar days in [1990-01-01, 2060-12-31].
@@ -75,6 +76,40 @@ fn weekday_set() -> impl Strategy<Value = Vec<String>> {
         .prop_map(|set| set.into_iter().map(|d| d.to_string()).collect())
 }
 
+/// Gör't's `word` arb: a lowercase word of 2..=6 letters.
+fn word() -> impl Strategy<Value = String> {
+    prop::collection::vec(0usize..26, 2..=6)
+        .prop_map(|v| v.into_iter().map(|i| (b'a' + i as u8) as char).collect())
+}
+
+/// Gör't's search task record: a subject of 1..=4 words and an optional body word.
+fn search_task() -> impl Strategy<Value = HydratedTask> {
+    (
+        prop::collection::vec(word(), 1..=4).prop_map(|ws| ws.join(" ")),
+        prop_oneof![Just(None::<String>), word().prop_map(Some)],
+    )
+        .prop_map(|(subject, body)| {
+            let task = Task {
+                id: String::new(),
+                subject,
+                status: TaskStatus::Open,
+                importance: Importance::Normal,
+                due_date: None,
+                reminder_at: None,
+                body,
+                focus_date: None,
+                postponed_date: None,
+                created_at: String::new(),
+                completed_at: None,
+                position: 0.0,
+                spawned_from: None,
+                parent_id: None,
+                recurrence: None,
+            };
+            HydratedTask::bare(task)
+        })
+}
+
 proptest! {
     /// Ported from "dates: parse/fmt round-trip; addDays inverse and shifts by n".
     #[test]
@@ -140,5 +175,57 @@ proptest! {
         let rule = v1.clone().expect("generator produces valid rules");
         let v2 = validate(Some(&RawRecurrence::from(rule))).unwrap();
         prop_assert_eq!(v1, v2);
+    }
+
+    /// Ported from "search: results always contain every query word and are a subset of input".
+    #[test]
+    fn search_results_contain_every_query_word_and_are_a_subset_of_input(
+        tasks in prop::collection::vec(search_task(), 0..=20),
+        qw in prop::collection::vec(word(), 1..=2),
+    ) {
+        let out = search_tasks(&tasks, &qw.join(" "), 50);
+        for t in out {
+            prop_assert!(tasks.contains(t));
+            // Gör't checks `${subject} ${body ?? ''}` (the generated tasks have no steps).
+            let hay = format!("{} {}", t.task.subject, t.task.body.as_deref().unwrap_or(""))
+                .to_lowercase();
+            for w in &qw {
+                prop_assert!(hay.contains(w), "word {w} missing from {hay:?}");
+            }
+        }
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(500))]
+
+    /// Ported from "nlp: never throws, subject is trimmed, due dates are valid".
+    #[test]
+    fn nlp_never_panics_subject_trimmed(text in "\\PC{0,60}", today in day()) {
+        use doene_core::nlp::{ParseOptions, parse_quick_add};
+        let r = parse_quick_add(&text, today, &ParseOptions::default());
+        prop_assert_eq!(r.subject.trim(), r.subject.as_str());
+        prop_assert!(!r.subject.contains(char::is_whitespace) || r.subject.split(' ').all(|w| !w.is_empty()));
+        if let Some(d) = r.due_date {
+            prop_assert!(Date::parse(&d.to_string()).is_ok());
+        }
+    }
+
+    /// Keyword-flavoured fuzz: recognised phrases mixed with noise never panic.
+    #[test]
+    fn nlp_phrase_soup_never_panics(
+        parts in proptest::collection::vec(
+            prop_oneof![
+                Just("every 1st"), Just("every 31st"), Just("2025-02-31"), Just("2024-02-29"),
+                Just("at 9am"), Just("at 25"), Just("tonight"), Just("every mon, fri"),
+                Just("!high"), Just("#Tag"), Just("in 99 months"), Just("xoday"), Just("ünï"),
+            ],
+            0..6,
+        ),
+        today in day(),
+    ) {
+        use doene_core::nlp::{ParseOptions, parse_quick_add};
+        let r = parse_quick_add(&parts.join(" "), today, &ParseOptions::default());
+        prop_assert_eq!(r.subject.trim(), r.subject.as_str());
     }
 }

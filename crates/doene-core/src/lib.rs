@@ -11,12 +11,16 @@ pub mod entities;
 pub mod errors;
 pub mod i18n;
 pub mod labels;
+pub mod nlp;
+pub mod quickadd;
 pub mod recurrence;
 pub mod smartlists;
+pub mod search;
 pub mod tree;
+pub mod view_rules;
 
 pub use agenda::{
-    DEFAULT_SORT, FocusMode, GroupKey, SortDirection, SortOrder, SortSpec, is_picked,
+    DEFAULT_SORT, FocusMode, GroupKey, SortOrder, SortSpec, is_picked,
 };
 pub use agenda_order::{
     AgendaLayoutSave, DEFAULT_ORDER, GROUP_KEYS, ORDER_KEYS, SECTION_BREAK, agenda_layout_save,
@@ -25,10 +29,16 @@ pub use agenda_order::{
 pub use dates::{Date, InvalidDate};
 pub use dnd::{DropOutcome, DropZone, GroupRect, TASK_EDGE};
 pub use entities::{
-    Importance, MatchMode, RecurrenceRule, RecurrenceType, RecurrenceUnit, Step, Tag, Task,
-    TaskStatus, TrashEntry, TrashKind, View, Weekday,
+    HydratedTask, Importance, MatchMode, RecurrenceRule, RecurrenceType, RecurrenceUnit, Step,
+    Tag, Task, TaskStatus, TrashEntry, TrashKind, View, Weekday,
 };
 pub use errors::CodedError;
+pub use nlp::{ParseOptions, ParsedQuickAdd, parse_quick_add};
 pub use recurrence::{RawRecurrence, TYPES, next_date, next_on_or_after, validate};
-pub use smartlists::{SMART, SmartList, SmartSettings, smart_tasks, sort_tasks, visible_order};
+pub use smartlists::{SMART, SmartList, SmartSettings, smart_tasks, visible_order};
+pub use search::{score, search_tasks};
 pub use tree::ParentMap;
+pub use view_rules::{
+    SORT_KEYS, RawSortLevel, RawView, SortDirection, SortKey, SortLevel, ViewRules,
+    normalise_view, sort_tasks, view_matches,
+};

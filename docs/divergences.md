@@ -99,7 +99,7 @@ an entry here (docs/plan.md §3).
 - **Pinning tests:** `i18n::tests::detect_language_picks_the_best_supported_language_by_q_value`,
   `i18n::tests::detect_language_handles_missing_or_empty_input`.
 
-## D6 — Agenda/smart-list API shape (note, not a behaviour change)
+## D7 — Agenda/smart-list API shape (note, not a behaviour change)
 
 - **What diverged:** Gör't's `smartTasks(id, ...)` takes a string id and
   `settings` bag; Döne uses a `SmartList` enum, a typed `SmartSettings`, and
@@ -109,3 +109,18 @@ an entry here (docs/plan.md §3).
   `Importance` has only `Normal`/`High`.
 - **Why:** type safety; membership, ordering and expiry behaviour are unchanged.
 - **Pinning tests:** `smartlists::tests::*`, `agenda::tests::*`.
+
+## D6 — Impossible ISO dates in quick-add text stay in the subject
+
+- **What diverged:** Gör't's NLP accepts an explicit `YYYY-MM-DD` token as a due
+  date whenever JS `Date.parse` does not return NaN. V8 rolls impossible
+  calendar days over (`Date.parse('2025-02-31')` → Mar 3), so `'x 2025-02-31'`
+  gets `due_date: '2025-02-31'` in Gör't — a due date that later arithmetic
+  silently drifts (D1). Döne's NLP validates the token through
+  `Date::parse`, which rejects impossible days, so the token is not recognised
+  and stays in the subject.
+- **Why:** this is D1 applied at the NLP seam: an impossible due date must be
+  unrepresentable, and the parser is where user input becomes a typed `Date`.
+  Accepting `'2025-02-31'` would store a value that drifts on every read.
+- **Pinning test:**
+  `crates/doene-core/tests/nlp_search.rs::an_impossible_iso_date_stays_in_the_subject`.
