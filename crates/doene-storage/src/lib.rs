@@ -8,6 +8,7 @@ use std::path::Path;
 
 use rusqlite::Connection;
 
+pub mod aux;
 pub mod migrations;
 pub mod tasks;
 

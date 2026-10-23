@@ -228,9 +228,134 @@ pub fn delete_tasks(conn: &Connection, ids: &[String]) -> rusqlite::Result<()> {
         return Ok(());
     }
     let marks = vec!["?"; ids.len()].join(",");
+    // Spawned occurrences keep living when their origin goes (Gör't: ON DELETE SET NULL).
+    conn.execute(
+        &format!("UPDATE tasks SET spawned_from = NULL WHERE spawned_from IN ({marks})"),
+        params_from_iter(ids.iter()),
+    )?;
     conn.execute(
         &format!("DELETE FROM tasks WHERE id IN ({marks})"),
         params_from_iter(ids.iter()),
     )?;
     Ok(())
+}
+
+/// Overwrite every column of an existing task row with `t` (tags and steps untouched).
+pub fn update_task(conn: &Connection, t: &Task) -> rusqlite::Result<()> {
+    let (kind, interval, unit, days) = match &t.recurrence {
+        Some(r) => (
+            Some(r.kind.as_token()),
+            r.interval.map(i64::from),
+            r.unit.map(RecurrenceUnit::as_token),
+            recurrence_days_text(&r.days),
+        ),
+        None => (None, None, None, None),
+    };
+    conn.execute(
+        "UPDATE tasks SET subject=?2, status=?3, importance=?4, due_date=?5, reminder_at=?6, body=?7, \
+         focus_date=?8, postponed_date=?9, created_at=?10, completed_at=?11, position=?12, \
+         spawned_from=?13, parent_id=?14, recurrence_type=?15, recurrence_interval=?16, \
+         recurrence_unit=?17, recurrence_days=?18 WHERE id=?1",
+        params![
+            t.id,
+            t.subject,
+            status_token(t.status),
+            importance_token(t.importance),
+            date_text(t.due_date),
+            t.reminder_at,
+            t.body,
+            date_text(t.focus_date),
+            date_text(t.postponed_date),
+            t.created_at,
+            t.completed_at,
+            t.position,
+            t.spawned_from,
+            t.parent_id,
+            kind,
+            interval,
+            unit,
+            days,
+        ],
+    )?;
+    Ok(())
+}
+
+/// One task with tags and steps.
+pub fn hydrated(conn: &Connection, id: &str) -> rusqlite::Result<Option<HydratedTask>> {
+    task(conn, id)?.map(|t| hydrate(conn, t)).transpose()
+}
+
+/// Direct children of `parent` (`None` = top level) as `(id, position)`, by position then id.
+pub fn siblings(conn: &Connection, parent: Option<&str>) -> rusqlite::Result<Vec<(String, f64)>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, position FROM tasks WHERE parent_id IS ?1 ORDER BY position, id",
+    )?;
+    stmt.query_map(params![parent], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()
+}
+
+/// Every descendant id of a task, breadth-first (parents before children).
+pub fn descendants(conn: &Connection, id: &str) -> rusqlite::Result<Vec<String>> {
+    let mut out = Vec::new();
+    let mut frontier = vec![id.to_owned()];
+    let mut stmt = conn.prepare("SELECT id FROM tasks WHERE parent_id = ?1 ORDER BY position, id")?;
+    while !frontier.is_empty() {
+        let mut next = Vec::new();
+        for f in &frontier {
+            for c in stmt.query_map(params![f], |r| r.get::<_, String>(0))? {
+                let c = c?;
+                out.push(c.clone());
+                next.push(c);
+            }
+        }
+        frontier = next;
+    }
+    Ok(out)
+}
+
+/// Id -> parent id for every task (feeds the core tree guards).
+pub fn parent_map(conn: &Connection) -> rusqlite::Result<std::collections::HashMap<String, Option<String>>> {
+    let mut stmt = conn.prepare("SELECT id, parent_id FROM tasks")?;
+    stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()
+}
+
+/// One step by id.
+pub fn step(conn: &Connection, id: &str) -> rusqlite::Result<Option<Step>> {
+    conn.query_row(
+        "SELECT id, task_id, subject, status, position FROM steps WHERE id = ?1",
+        params![id],
+        |r| {
+            Ok(Step {
+                id: r.get(0)?,
+                task_id: r.get(1)?,
+                subject: r.get(2)?,
+                status: status_from(&r.get::<_, String>(3)?),
+                position: r.get(4)?,
+            })
+        },
+    )
+    .optional()
+}
+
+/// Overwrite a step's subject, status and position.
+pub fn update_step(conn: &Connection, s: &Step) -> rusqlite::Result<()> {
+    conn.execute(
+        "UPDATE steps SET subject=?2, status=?3, position=?4 WHERE id=?1",
+        params![s.id, s.subject, status_token(s.status), s.position],
+    )?;
+    Ok(())
+}
+
+/// Delete one step.
+pub fn delete_step(conn: &Connection, id: &str) -> rusqlite::Result<()> {
+    conn.execute("DELETE FROM steps WHERE id = ?1", params![id])?;
+    Ok(())
+}
+
+/// Smallest and largest position among a task's steps.
+pub fn step_position_bounds(conn: &Connection, task_id: &str) -> rusqlite::Result<(Option<f64>, Option<f64>)> {
+    conn.query_row(
+        "SELECT MIN(position), MAX(position) FROM steps WHERE task_id = ?1",
+        params![task_id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )
 }

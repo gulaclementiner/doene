@@ -114,3 +114,42 @@ fn deleting_a_task_cascades_steps_and_tags() {
     assert_eq!(count("SELECT COUNT(*) FROM steps"), 0);
     assert_eq!(count("SELECT COUNT(*) FROM task_tags"), 0);
 }
+
+#[test]
+fn deleting_an_origin_keeps_its_spawned_occurrence() {
+    let store = Storage::open_in_memory().expect("open");
+    let mut origin = sample_task();
+    origin.recurrence = None;
+    let mut spawn = origin.clone();
+    spawn.id = "spawn".into();
+    spawn.spawned_from = Some(origin.id.clone());
+    tasks::insert_task(store.conn(), &origin).unwrap();
+    tasks::insert_task(store.conn(), &spawn).unwrap();
+    tasks::delete_tasks(store.conn(), &[origin.id.clone()]).expect("delete");
+    let kept = tasks::task(store.conn(), "spawn").unwrap().expect("kept");
+    assert_eq!(kept.spawned_from, None);
+}
+
+#[test]
+fn subtree_descendants_and_sibling_order() {
+    let store = Storage::open_in_memory().expect("open");
+    let mut root = sample_task();
+    root.recurrence = None;
+    let mk = |id: &str, parent: &str, pos: f64| {
+        let mut t = root.clone();
+        t.id = id.into();
+        t.parent_id = Some(parent.into());
+        t.position = pos;
+        t
+    };
+    tasks::insert_task(store.conn(), &root).unwrap();
+    tasks::insert_task(store.conn(), &mk("b", &root.id, 2.0)).unwrap();
+    tasks::insert_task(store.conn(), &mk("a", &root.id, 1.0)).unwrap();
+    tasks::insert_task(store.conn(), &mk("c", "a", 1.0)).unwrap();
+    assert_eq!(tasks::descendants(store.conn(), &root.id).unwrap(), ["a", "b", "c"]);
+    let sib: Vec<String> = tasks::siblings(store.conn(), Some(&root.id)).unwrap().into_iter().map(|s| s.0).collect();
+    assert_eq!(sib, ["a", "b"]);
+    // deleting the whole subtree in one statement honours the parent FK
+    tasks::delete_tasks(store.conn(), &["a".into(), "b".into(), "c".into(), root.id.clone()]).unwrap();
+    assert!(tasks::all_tasks(store.conn()).unwrap().is_empty());
+}
