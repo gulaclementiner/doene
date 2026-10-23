@@ -8,7 +8,7 @@ use doene_service::Service;
 use eframe::egui::{self, Color32, RichText};
 use serde_json::json;
 
-use crate::model::{TaskRow, Theme, list_rows};
+use crate::model::{TaskRow, Theme, Toggled, list_rows, toggle_complete};
 
 const CORAL: Color32 = Color32::from_rgb(0xe4, 0x57, 0x2e);
 const AMBER: Color32 = Color32::from_rgb(0xc9, 0x8a, 0x1b);
@@ -21,6 +21,8 @@ pub struct DöneApp {
     locale: String,
     composer: String,
     error: Option<String>,
+    /// Transient feedback line (replaced by toasts in #12).
+    notice: Option<String>,
     rows: Vec<TaskRow>,
     applied_theme: Option<Theme>,
 }
@@ -46,6 +48,7 @@ impl DöneApp {
             locale: "en".into(),
             composer: String::new(),
             error: None,
+            notice: None,
             rows: vec![],
             applied_theme: None,
         };
@@ -85,6 +88,23 @@ impl DöneApp {
                 self.error = Some(e.to_string());
                 self.composer = text;
             }
+        }
+        self.reload();
+    }
+
+    fn toggle(&mut self, id: &str, completed: bool) {
+        match toggle_complete(&self.service, id, completed, &self.locale) {
+            Ok(Toggled::Completed { next_due: Some(date) }) => {
+                let p = HashMap::from([("date".to_owned(), Some(date))]);
+                self.notice = Some(tr("task.completedNext", &p, Some(&self.locale)));
+                self.error = None;
+            }
+            Ok(Toggled::Completed { next_due: None }) => {
+                self.notice = Some(self.t("task.completedToast"));
+                self.error = None;
+            }
+            Ok(Toggled::Reopened) => self.notice = None,
+            Err(e) => self.error = Some(e.to_string()),
         }
         self.reload();
     }
@@ -166,10 +186,20 @@ impl eframe::App for DöneApp {
             if let Some(e) = &self.error {
                 ui.colored_label(Color32::from_rgb(0xd6, 0x45, 0x45), e);
             }
+            if let Some(n) = &self.notice {
+                ui.label(RichText::new(n).small().weak());
+            }
             ui.add_space(6.0);
             egui::ScrollArea::vertical().show(ui, |ui| {
+                let mut clicked = None;
                 for r in &self.rows {
                     ui.horizontal(|ui| {
+                        let mut done = r.completed;
+                        let p = HashMap::from([("name".to_owned(), Some(r.subject.clone()))]);
+                        let hint = tr("task.complete", &p, Some(&self.locale));
+                        if ui.checkbox(&mut done, "").on_hover_text(hint).clicked() {
+                            clicked = Some((r.id.clone(), r.completed));
+                        }
                         let mut subject = RichText::new(&r.subject);
                         if r.completed {
                             subject = subject.strikethrough().weak();
@@ -186,6 +216,9 @@ impl eframe::App for DöneApp {
                             ui.label(RichText::new(tag).small().weak());
                         }
                     });
+                }
+                if let Some((id, was)) = clicked {
+                    self.toggle(&id, was);
                 }
             });
         });
