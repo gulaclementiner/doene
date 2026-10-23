@@ -903,7 +903,10 @@ version = "0.1.0"
 dependencies = [
  "doene-core",
  "doene-service",
+ "doene-storage",
  "eframe",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

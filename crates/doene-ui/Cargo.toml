@@ -8,3 +8,8 @@ description = "Döne user interface: eframe/egui app"
 eframe = { workspace = true }
 doene-core = { workspace = true }
 doene-service = { workspace = true }
+serde_json = "1"
+
+[dev-dependencies]
+doene-storage = { workspace = true }
+tempfile = "3"

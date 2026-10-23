@@ -22,10 +22,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let data_dir = resolve_data_dir(env::var(DATA_DIR_ENV).ok().as_deref(), &base);
     std::fs::create_dir_all(&data_dir)?;
 
+    let storage = doene_storage::Storage::open(&data_dir.join("done.db"))?;
+    let service = doene_service::Service::new(storage);
+
     eframe::run_native(
         "Döne",
         eframe::NativeOptions::default(),
-        Box::new(|_cc| Ok(Box::new(doene_ui::DöneApp))),
+        Box::new(move |_cc| Ok(Box::new(doene_ui::DöneApp::new(service)))),
     )?;
     Ok(())
 }
