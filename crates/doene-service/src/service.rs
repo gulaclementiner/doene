@@ -62,6 +62,9 @@ impl From<rusqlite::Error> for ServiceError {
     }
 }
 
+mod export;
+pub use export::{EXPORT_FORMAT, EXPORT_VERSION, ImportSummary};
+
 type Res<T> = Result<T, ServiceError>;
 
 fn not_found(what: &'static str, label: &str) -> ServiceError {

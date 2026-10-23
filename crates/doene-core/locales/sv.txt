@@ -350,3 +350,4 @@ trash.itemDeleted=Raderad {when}
 error.invalidDate=ogiltigt datum (använd ÅÅÅÅ-MM-DD)
 error.invalidReminder=ogiltig påminnelse (använd ÅÅÅÅ-MM-DD HH:MM)
 drawer.activity=Aktivitet
+error.importInvalid=ogiltig importfil: {what}

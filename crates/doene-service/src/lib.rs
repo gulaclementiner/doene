@@ -13,6 +13,6 @@ mod snapshot;
 pub use doene_core::CodedError;
 pub use doene_storage::views::SavedView;
 pub use service::{
-    Clock, NewTask, Service, ServiceError, Settings, StepPatch, TaskPatch, TrashItem, Restored,
+    Clock, EXPORT_FORMAT, EXPORT_VERSION, ImportSummary, NewTask, Service, ServiceError, Settings, StepPatch, TaskPatch, TrashItem, Restored,
     UndoKind, UpdateOutcome, TRASH_DAYS,
 };

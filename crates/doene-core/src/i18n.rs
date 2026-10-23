@@ -815,6 +815,7 @@ mod tests {
             "error.unknownPrefScope",
             "error.prefValueRequired",
             "error.exportVersion",
+            "error.importInvalid",
             "error.unsupportedLanguage",
             "trash.title",
             "trash.empty",
