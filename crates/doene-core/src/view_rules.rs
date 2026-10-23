@@ -84,7 +84,10 @@ pub struct ViewRules {
 pub fn normalise_view(v: &RawView) -> Result<ViewRules, CodedError> {
     let name = v.name.as_deref().unwrap_or("").trim().to_owned();
     if name.is_empty() {
-        return Err(CodedError::new("error.viewNameRequired", "view name required"));
+        return Err(CodedError::new(
+            "error.viewNameRequired",
+            "view name required",
+        ));
     }
 
     let match_mode = match v.match_mode.as_deref().unwrap_or("any") {
@@ -94,7 +97,7 @@ pub fn normalise_view(v: &RawView) -> Result<ViewRules, CodedError> {
             return Err(CodedError::new(
                 "error.viewMatchInvalid",
                 format!("match must be any or all (got {other})"),
-            ))
+            ));
         }
     };
 
@@ -169,7 +172,11 @@ pub fn sort_tasks<'a>(tasks: &'a [HydratedTask], sorts: &[SortLevel]) -> Vec<&'a
         let dir = level.dir;
         out.sort_by(|a, b| {
             let o = cmp_level(a, b, level.by);
-            if dir == SortDirection::Desc { o.reverse() } else { o }
+            if dir == SortDirection::Desc {
+                o.reverse()
+            } else {
+                o
+            }
         });
     }
     out
@@ -177,7 +184,11 @@ pub fn sort_tasks<'a>(tasks: &'a [HydratedTask], sorts: &[SortLevel]) -> Vec<&'a
 
 fn cmp_level(a: &HydratedTask, b: &HydratedTask, by: SortKey) -> Ordering {
     match by {
-        SortKey::Name => a.task.subject.to_lowercase().cmp(&b.task.subject.to_lowercase()),
+        SortKey::Name => a
+            .task
+            .subject
+            .to_lowercase()
+            .cmp(&b.task.subject.to_lowercase()),
         // Undated sorts last (Gör't's `'9999-12-31'` sentinel).
         SortKey::Due => match (a.task.due_date, b.task.due_date) {
             (Some(x), Some(y)) => x.cmp(&y),
@@ -187,9 +198,11 @@ fn cmp_level(a: &HydratedTask, b: &HydratedTask, by: SortKey) -> Ordering {
         },
         SortKey::Created => a.task.created_at.cmp(&b.task.created_at),
         // NaN positions compare equal and fall to the next level.
-        SortKey::Manual => {
-            a.task.position.partial_cmp(&b.task.position).unwrap_or(Ordering::Equal)
-        }
+        SortKey::Manual => a
+            .task
+            .position
+            .partial_cmp(&b.task.position)
+            .unwrap_or(Ordering::Equal),
     }
 }
 
@@ -235,12 +248,15 @@ mod tests {
     fn sort_key_tokens_round_trip() {
         for token in SORT_KEYS {
             let key = SortKey::from_token(token).expect("known key");
-            assert_eq!(SortKey::from_token(match key {
-                SortKey::Name => "name",
-                SortKey::Due => "due",
-                SortKey::Created => "created",
-                SortKey::Manual => "manual",
-            }), Some(key));
+            assert_eq!(
+                SortKey::from_token(match key {
+                    SortKey::Name => "name",
+                    SortKey::Due => "due",
+                    SortKey::Created => "created",
+                    SortKey::Manual => "manual",
+                }),
+                Some(key)
+            );
         }
         assert_eq!(SortKey::from_token("importance"), None);
     }

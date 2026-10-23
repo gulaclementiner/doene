@@ -102,20 +102,22 @@ pub fn smart_tasks<'a>(
             };
             agenda_open_tasks(tasks, &opts).expect("the default order has only known keys")
         }
-        SmartList::Important => tasks.iter().filter(|t| t.importance == Importance::High).collect(),
+        SmartList::Important => tasks
+            .iter()
+            .filter(|t| t.importance == Importance::High)
+            .collect(),
         SmartList::Planned => tasks.iter().filter(|t| t.due_date.is_some()).collect(),
         SmartList::All => tasks.iter().collect(),
-        SmartList::Completed => tasks.iter().filter(|t| t.status == TaskStatus::Completed).collect(),
+        SmartList::Completed => tasks
+            .iter()
+            .filter(|t| t.status == TaskStatus::Completed)
+            .collect(),
     }
 }
 
 /// Sort per list preferences (Gör't's `sortTasks`): stable; `important_to_top`
 /// then floats high-importance tasks above the rest, keeping their order.
-pub fn sort_tasks<'a>(
-    tasks: &[&'a Task],
-    sort: SortSpec,
-    important_to_top: bool,
-) -> Vec<&'a Task> {
+pub fn sort_tasks<'a>(tasks: &[&'a Task], sort: SortSpec, important_to_top: bool) -> Vec<&'a Task> {
     fn rank(i: Importance) -> u8 {
         match i {
             Importance::High => 0,
@@ -135,7 +137,10 @@ pub fn sort_tasks<'a>(
             },
             SortOrder::Alpha => a.subject.to_lowercase().cmp(&b.subject.to_lowercase()),
             SortOrder::Created => a.created_at.cmp(&b.created_at),
-            SortOrder::Manual => a.position.partial_cmp(&b.position).unwrap_or(Ordering::Equal),
+            SortOrder::Manual => a
+                .position
+                .partial_cmp(&b.position)
+                .unwrap_or(Ordering::Equal),
         };
         match sort.direction {
             SortDirection::Asc => ord,
@@ -143,8 +148,9 @@ pub fn sort_tasks<'a>(
         }
     });
     if important_to_top {
-        let (high, rest): (Vec<_>, Vec<_>) =
-            out.into_iter().partition(|t| t.importance == Importance::High);
+        let (high, rest): (Vec<_>, Vec<_>) = out
+            .into_iter()
+            .partition(|t| t.importance == Importance::High);
         return high.into_iter().chain(rest).collect();
     }
     out
@@ -182,7 +188,10 @@ mod tests {
         v.iter().map(|t| t.id.as_str()).collect()
     }
 
-    const NONE: SmartSettings = SmartSettings { focus_mode: FocusMode::Daily, my_day_radar: false };
+    const NONE: SmartSettings = SmartSettings {
+        focus_mode: FocusMode::Daily,
+        my_day_radar: false,
+    };
 
     // core.test.js — "My Day is the computed agenda; picks and due dates expire at midnight".
     #[test]
@@ -194,7 +203,12 @@ mod tests {
         let mut c = t("c");
         c.due_date = Some(d("2025-03-13"));
         let tasks = vec![a, b, c];
-        let mut day1 = ids(&smart_tasks(SmartList::MyDay, &tasks, d("2025-03-12"), NONE));
+        let mut day1 = ids(&smart_tasks(
+            SmartList::MyDay,
+            &tasks,
+            d("2025-03-12"),
+            NONE,
+        ));
         day1.sort();
         assert_eq!(day1, ["a", "b"]);
         // Midnight: a's pick is gone, b is overdue, c is due today.
@@ -211,11 +225,20 @@ mod tests {
         old.focus_date = Some(d("2025-03-10"));
         let tasks = vec![old];
         let today = d("2025-03-12");
-        let durable = SmartSettings { focus_mode: FocusMode::Durable, my_day_radar: false };
+        let durable = SmartSettings {
+            focus_mode: FocusMode::Durable,
+            my_day_radar: false,
+        };
         assert!(smart_tasks(SmartList::Shortlisted, &tasks, today, NONE).is_empty());
-        assert_eq!(ids(&smart_tasks(SmartList::Shortlisted, &tasks, today, durable)), ["old-pick"]);
+        assert_eq!(
+            ids(&smart_tasks(SmartList::Shortlisted, &tasks, today, durable)),
+            ["old-pick"]
+        );
         assert!(smart_tasks(SmartList::MyDay, &tasks, today, NONE).is_empty());
-        assert_eq!(ids(&smart_tasks(SmartList::MyDay, &tasks, today, durable)), ["old-pick"]);
+        assert_eq!(
+            ids(&smart_tasks(SmartList::MyDay, &tasks, today, durable)),
+            ["old-pick"]
+        );
     }
 
     // core.test.js — "radar: ... only when the setting is on (#98)".
@@ -227,9 +250,18 @@ mod tests {
         due.due_date = Some(d("2025-03-12"));
         let tasks = vec![radar, due];
         let today = d("2025-03-12");
-        assert_eq!(ids(&smart_tasks(SmartList::MyDay, &tasks, today, NONE)), ["due-now"]);
-        let on = SmartSettings { focus_mode: FocusMode::Daily, my_day_radar: true };
-        assert_eq!(ids(&smart_tasks(SmartList::MyDay, &tasks, today, on)), ["due-now", "on-radar"]);
+        assert_eq!(
+            ids(&smart_tasks(SmartList::MyDay, &tasks, today, NONE)),
+            ["due-now"]
+        );
+        let on = SmartSettings {
+            focus_mode: FocusMode::Daily,
+            my_day_radar: true,
+        };
+        assert_eq!(
+            ids(&smart_tasks(SmartList::MyDay, &tasks, today, on)),
+            ["due-now", "on-radar"]
+        );
     }
 
     // core.test.js — "important / planned / completed / all".
@@ -243,16 +275,27 @@ mod tests {
         let tasks = vec![imp, due];
         let today = d("2025-03-12");
         let get = |l| smart_tasks(l, &tasks, today, NONE);
-        assert_eq!(ids(&get(SmartList::Important)), ["imp"], "closed tasks stay in Important");
+        assert_eq!(
+            ids(&get(SmartList::Important)),
+            ["imp"],
+            "closed tasks stay in Important"
+        );
         assert_eq!(ids(&get(SmartList::Completed)), ["imp"]);
         assert_eq!(ids(&get(SmartList::Planned)), ["due"]);
-        assert_eq!(get(SmartList::All).len(), 2, "All holds open and closed tasks");
+        assert_eq!(
+            get(SmartList::All).len(),
+            2,
+            "All holds open and closed tasks"
+        );
         // Planned keeps completed dated tasks too.
         let mut done = t("done");
         done.due_date = Some(d("2025-03-01"));
         done.status = TaskStatus::Completed;
         let tasks = vec![done];
-        assert_eq!(ids(&smart_tasks(SmartList::Planned, &tasks, today, NONE)), ["done"]);
+        assert_eq!(
+            ids(&smart_tasks(SmartList::Planned, &tasks, today, NONE)),
+            ["done"]
+        );
     }
 
     // module-error-codes.test.js — "unknown smart list carries code and id".
@@ -277,10 +320,22 @@ mod tests {
         let tasks = [b, a];
         let refs: Vec<&Task> = tasks.iter().collect();
         let s = |order, direction, top| sort_tasks(&refs, SortSpec { order, direction }, top);
-        assert_eq!(ids(&s(SortOrder::Alpha, SortDirection::Asc, false)), ["A", "b"]);
-        assert_eq!(ids(&s(SortOrder::Alpha, SortDirection::Desc, false)), ["b", "A"]);
-        assert_eq!(ids(&s(SortOrder::Manual, SortDirection::Asc, true)), ["A", "b"]);
-        assert_eq!(ids(&s(SortOrder::Importance, SortDirection::Asc, false)), ["A", "b"]);
+        assert_eq!(
+            ids(&s(SortOrder::Alpha, SortDirection::Asc, false)),
+            ["A", "b"]
+        );
+        assert_eq!(
+            ids(&s(SortOrder::Alpha, SortDirection::Desc, false)),
+            ["b", "A"]
+        );
+        assert_eq!(
+            ids(&s(SortOrder::Manual, SortDirection::Asc, true)),
+            ["A", "b"]
+        );
+        assert_eq!(
+            ids(&s(SortOrder::Importance, SortDirection::Asc, false)),
+            ["A", "b"]
+        );
         // Undated last under due-asc; stable ties.
         let mut x = t("x");
         x.due_date = Some(d("2025-03-02"));

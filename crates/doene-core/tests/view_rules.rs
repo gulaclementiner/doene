@@ -3,7 +3,7 @@
 
 use doene_core::entities::{HydratedTask, Importance, MatchMode, Tag, Task, TaskStatus};
 use doene_core::view_rules::{
-    SORT_KEYS, RawSortLevel, RawView, SortDirection, SortKey, SortLevel, normalise_view,
+    RawSortLevel, RawView, SORT_KEYS, SortDirection, SortKey, SortLevel, normalise_view,
     sort_tasks, view_matches,
 };
 
@@ -35,7 +35,10 @@ fn ht(task: Task) -> HydratedTask {
 /// An open task carrying the given tags (Gör't's `t(id, {tags})`).
 fn tagged(id: &str, tags: &[&str]) -> HydratedTask {
     let mut h = ht(t(id));
-    h.tags = tags.iter().map(|s| Tag::new(s).expect("valid tag")).collect();
+    h.tags = tags
+        .iter()
+        .map(|s| Tag::new(s).expect("valid tag"))
+        .collect();
     h
 }
 
@@ -62,7 +65,10 @@ fn normalise_trims_name_defaults_match_and_showed_dedupes_tags_falls_back_to_asc
     assert_eq!(v.match_mode, MatchMode::Any);
     assert_eq!(
         v.sorts,
-        vec![SortLevel { by: SortKey::Name, dir: SortDirection::Asc }]
+        vec![SortLevel {
+            by: SortKey::Name,
+            dir: SortDirection::Asc
+        }]
     );
     assert!(!v.show_done);
 }
@@ -112,7 +118,10 @@ fn normalise_keeps_manual_direction_asc() {
     .unwrap();
     assert_eq!(
         v.sorts,
-        vec![SortLevel { by: SortKey::Manual, dir: SortDirection::Asc }]
+        vec![SortLevel {
+            by: SortKey::Manual,
+            dir: SortDirection::Asc
+        }]
     );
 }
 
@@ -198,15 +207,41 @@ fn sort_tasks_name_due_undated_last_and_created_ascending_and_descending() {
     c.created_at = "2025-01-01T00:00:00.000Z".to_owned();
     let tasks = vec![ht(b), ht(a), ht(c)];
 
-    let ids = |sorts: &[SortLevel]| sort_tasks(&tasks, sorts).iter().map(|x| x.task.id.clone()).collect::<Vec<_>>();
-    assert_eq!(ids(&[SortLevel { by: SortKey::Name, dir: SortDirection::Asc }]), vec!["a", "b", "c"]);
-    assert_eq!(ids(&[SortLevel { by: SortKey::Name, dir: SortDirection::Desc }]), vec!["c", "b", "a"]);
+    let ids = |sorts: &[SortLevel]| {
+        sort_tasks(&tasks, sorts)
+            .iter()
+            .map(|x| x.task.id.clone())
+            .collect::<Vec<_>>()
+    };
     assert_eq!(
-        ids(&[SortLevel { by: SortKey::Due, dir: SortDirection::Asc }]),
+        ids(&[SortLevel {
+            by: SortKey::Name,
+            dir: SortDirection::Asc
+        }]),
+        vec!["a", "b", "c"]
+    );
+    assert_eq!(
+        ids(&[SortLevel {
+            by: SortKey::Name,
+            dir: SortDirection::Desc
+        }]),
+        vec!["c", "b", "a"]
+    );
+    assert_eq!(
+        ids(&[SortLevel {
+            by: SortKey::Due,
+            dir: SortDirection::Asc
+        }]),
         vec!["a", "b", "c"],
         "undated sorts last"
     );
-    assert_eq!(ids(&[SortLevel { by: SortKey::Created, dir: SortDirection::Asc }]), vec!["c", "b", "a"]);
+    assert_eq!(
+        ids(&[SortLevel {
+            by: SortKey::Created,
+            dir: SortDirection::Asc
+        }]),
+        vec!["c", "b", "a"]
+    );
 }
 
 #[test]
@@ -223,8 +258,14 @@ fn sort_tasks_multi_level_ties_from_the_first_level_fall_to_the_next() {
         sort_tasks(
             &tasks,
             &[
-                SortLevel { by: SortKey::Due, dir: SortDirection::Asc },
-                SortLevel { by: SortKey::Name, dir: SortDirection::Desc },
+                SortLevel {
+                    by: SortKey::Due,
+                    dir: SortDirection::Asc
+                },
+                SortLevel {
+                    by: SortKey::Name,
+                    dir: SortDirection::Desc
+                },
             ]
         )
         .iter()
@@ -256,15 +297,33 @@ fn sort_tasks_manual_uses_position_and_no_levels_keeps_input_order_without_mutat
     .sorts;
     assert_eq!(
         sorts,
-        vec![SortLevel { by: SortKey::Manual, dir: SortDirection::Asc }],
+        vec![SortLevel {
+            by: SortKey::Manual,
+            dir: SortDirection::Asc
+        }],
         "normaliseView forces manual to asc, so the direction is ignored"
     );
 
-    let ids = |sorts: &[SortLevel]| sort_tasks(&tasks, sorts).iter().map(|x| x.task.id.clone()).collect::<Vec<_>>();
+    let ids = |sorts: &[SortLevel]| {
+        sort_tasks(&tasks, sorts)
+            .iter()
+            .map(|x| x.task.id.clone())
+            .collect::<Vec<_>>()
+    };
     assert_eq!(ids(&sorts), vec!["p1", "p2", "p3"]);
-    assert_eq!(ids(&[]), vec!["p2", "p1", "p3"], "no sort levels keeps the input order");
+    assert_eq!(
+        ids(&[]),
+        vec!["p2", "p1", "p3"],
+        "no sort levels keeps the input order"
+    );
 
-    sort_tasks(&tasks, &[SortLevel { by: SortKey::Name, dir: SortDirection::Asc }]);
+    sort_tasks(
+        &tasks,
+        &[SortLevel {
+            by: SortKey::Name,
+            dir: SortDirection::Asc,
+        }],
+    );
     assert_eq!(
         tasks.iter().map(|x| x.task.id.clone()).collect::<Vec<_>>(),
         vec!["p2", "p1", "p3"],

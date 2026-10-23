@@ -205,13 +205,20 @@ pub fn agenda<'a>(tasks: &'a [Task], opts: &AgendaOptions) -> Result<Agenda<'a>,
 
     for key in &opts.order {
         if key == SECTION_BREAK {
-            let id = if sections.is_empty() { SectionId::DoFirst } else { SectionId::ContinueWith };
+            let id = if sections.is_empty() {
+                SectionId::DoFirst
+            } else {
+                SectionId::ContinueWith
+            };
             sections.push(Section { id, groups: vec![] });
             continue;
         }
         let group_key = GroupKey::from_token(key).ok_or(UnknownGroup(key.clone()))?;
         if sections.is_empty() {
-            sections.push(Section { id: SectionId::DoFirst, groups: vec![] });
+            sections.push(Section {
+                id: SectionId::DoFirst,
+                groups: vec![],
+            });
         }
         // Open tasks only; each task goes to the first matching group.
         let matched: Vec<&'a Task> = tasks
@@ -227,10 +234,14 @@ pub fn agenda<'a>(tasks: &'a [Task], opts: &AgendaOptions) -> Result<Agenda<'a>,
                 used.insert(t.id.as_str());
             }
             let matched = crate::smartlists::sort_tasks(&matched, opts.sort, false);
-            sections.last_mut().expect("a section exists after the push above").groups.push(Group {
-                key: group_key,
-                tasks: matched,
-            });
+            sections
+                .last_mut()
+                .expect("a section exists after the push above")
+                .groups
+                .push(Group {
+                    key: group_key,
+                    tasks: matched,
+                });
         }
     }
 
@@ -247,12 +258,18 @@ pub fn agenda<'a>(tasks: &'a [Task], opts: &AgendaOptions) -> Result<Agenda<'a>,
         .collect();
     completed.sort_by(|a, b| a.completed_at.cmp(&b.completed_at));
 
-    Ok(Agenda { sections, completed })
+    Ok(Agenda {
+        sections,
+        completed,
+    })
 }
 
 /// The open tasks the agenda shows, in agenda order (sections, then groups,
 /// then within-group order).
-pub fn agenda_open_tasks<'a>(tasks: &'a [Task], opts: &AgendaOptions) -> Result<Vec<&'a Task>, UnknownGroup> {
+pub fn agenda_open_tasks<'a>(
+    tasks: &'a [Task],
+    opts: &AgendaOptions,
+) -> Result<Vec<&'a Task>, UnknownGroup> {
     let a = agenda(tasks, opts)?;
     Ok(a.sections
         .iter()
@@ -456,14 +473,30 @@ mod tests {
             task!("plain"),
         ];
         let a = agenda(&tasks, &AgendaOptions::new(today)).unwrap();
-        assert_eq!(group_ids(&a, SectionId::DoFirst, GroupKey::Overdue), ["overdue"]);
-        assert_eq!(group_ids(&a, SectionId::DoFirst, GroupKey::StarredDue), ["starred"]);
-        assert_eq!(group_ids(&a, SectionId::ContinueWith, GroupKey::Shortlisted), ["pick"]);
+        assert_eq!(
+            group_ids(&a, SectionId::DoFirst, GroupKey::Overdue),
+            ["overdue"]
+        );
+        assert_eq!(
+            group_ids(&a, SectionId::DoFirst, GroupKey::StarredDue),
+            ["starred"]
+        );
+        assert_eq!(
+            group_ids(&a, SectionId::ContinueWith, GroupKey::Shortlisted),
+            ["pick"]
+        );
         // `starred` was already taken by starred-due (first match wins).
-        assert_eq!(group_ids(&a, SectionId::ContinueWith, GroupKey::DueToday), ["due"]);
+        assert_eq!(
+            group_ids(&a, SectionId::ContinueWith, GroupKey::DueToday),
+            ["due"]
+        );
         let mut all = all_group_tasks(&a);
         all.sort();
-        assert_eq!(all, ["due", "overdue", "pick", "starred"], "the union of groups is exactly the open tasks");
+        assert_eq!(
+            all,
+            ["due", "overdue", "pick", "starred"],
+            "the union of groups is exactly the open tasks"
+        );
     }
 
     // Gör't — "first-match dedup: a task appears in exactly one group".
@@ -478,9 +511,18 @@ mod tests {
         ];
         let opts = AgendaOptions::new(today);
         let a = agenda(&tasks, &opts).unwrap();
-        assert_eq!(group_ids(&a, SectionId::DoFirst, GroupKey::Overdue), ["overdue-starred"]);
-        assert_eq!(group_ids(&a, SectionId::DoFirst, GroupKey::StarredDue), ["starred"]);
-        assert_eq!(group_ids(&a, SectionId::ContinueWith, GroupKey::Shortlisted), ["pick-due"]);
+        assert_eq!(
+            group_ids(&a, SectionId::DoFirst, GroupKey::Overdue),
+            ["overdue-starred"]
+        );
+        assert_eq!(
+            group_ids(&a, SectionId::DoFirst, GroupKey::StarredDue),
+            ["starred"]
+        );
+        assert_eq!(
+            group_ids(&a, SectionId::ContinueWith, GroupKey::Shortlisted),
+            ["pick-due"]
+        );
         // due-today is empty: both of its candidates were taken earlier.
         assert_eq!(
             group_ids(&a, SectionId::ContinueWith, GroupKey::DueToday),
@@ -550,7 +592,10 @@ mod tests {
         ];
         let a = agenda(&tasks, &AgendaOptions::new(today)).unwrap();
         assert_eq!(
-            a.completed.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+            a.completed
+                .iter()
+                .map(|t| t.id.as_str())
+                .collect::<Vec<_>>(),
             ["early", "mid", "late"]
         );
         // The open task matches no group.
@@ -580,11 +625,18 @@ mod tests {
         assert_eq!(
             a.sections
                 .iter()
-                .map(|s| s.groups.iter().map(|g| g.key.as_token()).collect::<Vec<_>>())
+                .map(|s| s
+                    .groups
+                    .iter()
+                    .map(|g| g.key.as_token())
+                    .collect::<Vec<_>>())
                 .collect::<Vec<_>>(),
             vec![vec!["due-today"], vec!["overdue"]]
         );
-        assert_eq!(group_ids(&a, SectionId::DoFirst, GroupKey::DueToday), ["pick-due", "starred"]);
+        assert_eq!(
+            group_ids(&a, SectionId::DoFirst, GroupKey::DueToday),
+            ["pick-due", "starred"]
+        );
         // shortlisted is empty (its only candidate was taken) and omitted.
         assert_eq!(
             group_ids(&a, SectionId::ContinueWith, GroupKey::Shortlisted),
@@ -610,16 +662,33 @@ mod tests {
         ];
         // Daily is the default.
         let a = agenda(&tasks, &AgendaOptions::new(today)).unwrap();
-        assert_eq!(group_ids(&a, SectionId::ContinueWith, GroupKey::Shortlisted), ["today-pick"]);
-        // Explicit daily agrees; durable keeps old picks.
-        let opts = AgendaOptions { focus_mode: FocusMode::Daily, ..AgendaOptions::new(today) };
         assert_eq!(
-            group_ids(&agenda(&tasks, &opts).unwrap(), SectionId::ContinueWith, GroupKey::Shortlisted),
+            group_ids(&a, SectionId::ContinueWith, GroupKey::Shortlisted),
             ["today-pick"]
         );
-        let opts = AgendaOptions { focus_mode: FocusMode::Durable, ..AgendaOptions::new(today) };
+        // Explicit daily agrees; durable keeps old picks.
+        let opts = AgendaOptions {
+            focus_mode: FocusMode::Daily,
+            ..AgendaOptions::new(today)
+        };
         assert_eq!(
-            group_ids(&agenda(&tasks, &opts).unwrap(), SectionId::ContinueWith, GroupKey::Shortlisted),
+            group_ids(
+                &agenda(&tasks, &opts).unwrap(),
+                SectionId::ContinueWith,
+                GroupKey::Shortlisted
+            ),
+            ["today-pick"]
+        );
+        let opts = AgendaOptions {
+            focus_mode: FocusMode::Durable,
+            ..AgendaOptions::new(today)
+        };
+        assert_eq!(
+            group_ids(
+                &agenda(&tasks, &opts).unwrap(),
+                SectionId::ContinueWith,
+                GroupKey::Shortlisted
+            ),
             ["today-pick", "old-pick"]
         );
     }
@@ -634,9 +703,18 @@ mod tests {
             task!("normal-undated"),
         ];
         let a = agenda(&tasks, &AgendaOptions::new(today)).unwrap();
-        assert_eq!(group_ids(&a, SectionId::ContinueWith, GroupKey::DueToday), Vec::<&str>::new());
-        assert_eq!(group_ids(&a, SectionId::ContinueWith, GroupKey::Radar), ["on-radar"]);
-        assert_eq!(group_ids(&a, SectionId::DoFirst, GroupKey::StarredDue), ["starred-dated"]);
+        assert_eq!(
+            group_ids(&a, SectionId::ContinueWith, GroupKey::DueToday),
+            Vec::<&str>::new()
+        );
+        assert_eq!(
+            group_ids(&a, SectionId::ContinueWith, GroupKey::Radar),
+            ["on-radar"]
+        );
+        assert_eq!(
+            group_ids(&a, SectionId::DoFirst, GroupKey::StarredDue),
+            ["starred-dated"]
+        );
     }
 
     // Gör't — "radar dedup: a high+undated pick goes to shortlisted first;
@@ -648,16 +726,28 @@ mod tests {
             vec![task!("pick-radar", importance => Importance::High, focus_date => Some(today))];
         // Default order: shortlisted (before radar) wins.
         let a = agenda(&tasks, &AgendaOptions::new(today)).unwrap();
-        assert_eq!(group_ids(&a, SectionId::ContinueWith, GroupKey::Shortlisted), ["pick-radar"]);
-        assert_eq!(group_ids(&a, SectionId::ContinueWith, GroupKey::Radar), Vec::<&str>::new());
+        assert_eq!(
+            group_ids(&a, SectionId::ContinueWith, GroupKey::Shortlisted),
+            ["pick-radar"]
+        );
+        assert_eq!(
+            group_ids(&a, SectionId::ContinueWith, GroupKey::Radar),
+            Vec::<&str>::new()
+        );
         // Reordered: radar first.
         let opts = AgendaOptions {
             order: vec![SECTION_BREAK.into(), "radar".into(), "shortlisted".into()],
             ..AgendaOptions::new(today)
         };
         let a = agenda(&tasks, &opts).unwrap();
-        assert_eq!(group_ids(&a, SectionId::DoFirst, GroupKey::Radar), ["pick-radar"]);
-        assert_eq!(group_ids(&a, SectionId::DoFirst, GroupKey::Shortlisted), Vec::<&str>::new());
+        assert_eq!(
+            group_ids(&a, SectionId::DoFirst, GroupKey::Radar),
+            ["pick-radar"]
+        );
+        assert_eq!(
+            group_ids(&a, SectionId::DoFirst, GroupKey::Shortlisted),
+            Vec::<&str>::new()
+        );
     }
 
     // Gör't — "unknown group keys are refused; input is not mutated".

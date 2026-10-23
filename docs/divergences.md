@@ -124,3 +124,32 @@ an entry here (docs/plan.md §3).
   Accepting `'2025-02-31'` would store a value that drifts on every read.
 - **Pinning test:**
   `crates/doene-core/tests/nlp_search.rs::an_impossible_iso_date_stays_in_the_subject`.
+
+## D8 — Swedish ordinal-unit recurrences ("var 40:e dag")
+
+- **What diverged:** Gör't's `var N:e <unit>` branch reuses the day-of-month
+  guard (`1..=31`), so `var 40:e dag` is rejected, and `var 1:a dag` yields
+  `{custom, interval 1}` — a rule that differs from `varje dag` / English
+  `every 1 day` (`{daily}`). Döne accepts any count >= 1 and collapses 1 to the
+  fixed kind (same as English `every 1 day`); `var 0:e dag` stays text.
+- **Why:** the 31 cap only makes sense for a day of the month; a count has no
+  such bound. EN and SV must not drift: the same rule meaning gives the same
+  stored rule.
+- **Pinning test:** `tests/nlp_sv.rs::d8_ordinal_unit_counts_are_not_capped_and_one_collapses`.
+
+## D9 — Years 0000-0099 in `d/m yyyy` are literal
+
+- **What diverged:** Gör't builds the date with JS `Date.UTC(year, ...)`, which
+  maps years 0-99 to 1900-1999 (`15/3 0050` becomes 1950-03-15). Döne keeps the
+  year as typed.
+- **Why:** silent remapping is a JS quirk, not user intent.
+- **Pinning test:** `tests/nlp_sv.rs::d9_years_below_100_are_literal`.
+
+## D10 — Absurdly large counts stay in the subject
+
+- **What diverged:** Gör't's `in 99999999999 days` / `om N dagar` produce an
+  Invalid Date and throw in `fmt`; `every 99999999999 days` stores an
+  unbounded interval. Döne leaves such phrases (offsets over 100 000, or an
+  interval not fitting `u32`) in the subject, without error.
+- **Why:** a parser of free text must never panic or throw on user input.
+- **Pinning test:** `tests/nlp_sv.rs::d10_absurd_counts_stay_in_the_subject`.

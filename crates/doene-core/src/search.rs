@@ -14,7 +14,11 @@ use crate::entities::{HydratedTask, TaskStatus};
 pub fn score(task: &HydratedTask, words: &[String]) -> i64 {
     let subj = task.task.subject.to_lowercase();
     let body = task.task.body.as_deref().unwrap_or("").to_lowercase();
-    let steps: Vec<String> = task.steps.iter().map(|s| s.subject.to_lowercase()).collect();
+    let steps: Vec<String> = task
+        .steps
+        .iter()
+        .map(|s| s.subject.to_lowercase())
+        .collect();
 
     let mut total = 0i64;
     for w in words {
@@ -49,7 +53,11 @@ fn non_word(c: char) -> bool {
 /// completed, then subject asc; at most `limit` tasks. Empty or blank
 /// queries return nothing.
 pub fn search_tasks<'a>(tasks: &'a [HydratedTask], q: &str, limit: usize) -> Vec<&'a HydratedTask> {
-    let words = q.to_lowercase().split_whitespace().map(str::to_owned).collect::<Vec<_>>();
+    let words = q
+        .to_lowercase()
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
     if words.is_empty() {
         return vec![];
     }
@@ -60,17 +68,23 @@ pub fn search_tasks<'a>(tasks: &'a [HydratedTask], q: &str, limit: usize) -> Vec
         .filter(|(_, s)| *s > 0)
         .collect();
     scored.sort_by(|a, b| {
-        b.1.cmp(&a.1).then_with(|| open_rank(a.0).cmp(&open_rank(b.0))).then_with(|| {
-            a.0.task
-                .subject
-                .to_lowercase()
-                .cmp(&b.0.task.subject.to_lowercase())
-        })
+        b.1.cmp(&a.1)
+            .then_with(|| open_rank(a.0).cmp(&open_rank(b.0)))
+            .then_with(|| {
+                a.0.task
+                    .subject
+                    .to_lowercase()
+                    .cmp(&b.0.task.subject.to_lowercase())
+            })
     });
     scored.into_iter().take(limit).map(|(t, _)| t).collect()
 }
 
 /// Open tasks rank before completed ones (Gör't's `(a.status === 'completed') - …`).
 fn open_rank(t: &HydratedTask) -> u8 {
-    if t.task.status == TaskStatus::Completed { 1 } else { 0 }
+    if t.task.status == TaskStatus::Completed {
+        1
+    } else {
+        0
+    }
 }
