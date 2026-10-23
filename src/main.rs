@@ -29,6 +29,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Döne",
         eframe::NativeOptions::default(),
         Box::new(move |_cc| {
+            // First run: adopt the OS locale (a saved choice always wins).
+            if let Err(e) = doene_ui::settings::init_language(&service, sys_locale::get_locale().as_deref()) {
+                eprintln!("language detection failed: {e:?}");
+            }
             let mut app = doene_ui::DöneApp::new(service);
             let notifier = doene_notify::system_notifier();
             app.set_notifier(

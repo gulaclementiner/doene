@@ -149,6 +149,14 @@ pub struct Settings {
     pub language: String,
     /// `light`, `dark` or `system` (default).
     pub theme: String,
+    /// First day of the week (0 Sunday, 1 Monday); the language's default until set.
+    pub week_start: u8,
+    /// `HH:MM` local time of the due-today notification.
+    pub due_notify_time: String,
+    /// Show the group sub-headings in My Day (default on).
+    pub show_my_day_headings: bool,
+    /// Whether a language has ever been saved (false on first run).
+    pub language_chosen: bool,
 }
 
 struct Ctx {
@@ -251,15 +259,25 @@ fn settings_in(conn: &Connection) -> Res<Settings> {
     let get = |k: &str| -> Res<Option<Value>> {
         Ok(aux::setting(conn, k)?.and_then(|s| serde_json::from_str(&s).ok()))
     };
+    let language = get("language")?
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .unwrap_or_else(|| "en".into());
     Ok(Settings {
+        week_start: get("weekStart")?
+            .and_then(|v| v.as_u64())
+            .filter(|n| *n <= 1)
+            .map_or_else(|| doene_core::i18n::week_start(Some(&language)), |n| n as u8),
+        due_notify_time: get("dueNotifyTime")?
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .unwrap_or_else(|| doene_core::notifications::DEFAULT_DUE_NOTIFY_TIME.into()),
+        show_my_day_headings: get("showMyDayGroupHeadings")?.and_then(|v| v.as_bool()).unwrap_or(true),
+        language_chosen: get("language")?.is_some(),
         add_tasks_to_top: get("addTasksToTop")?.and_then(|v| v.as_bool()).unwrap_or(false),
         focus_mode: match get("focusMode")?.as_ref().and_then(Value::as_str) {
             Some("durable") => FocusMode::Durable,
             _ => FocusMode::Daily,
         },
-        language: get("language")?
-            .and_then(|v| v.as_str().map(str::to_owned))
-            .unwrap_or_else(|| "en".into()),
+        language,
         theme: get("theme")?
             .and_then(|v| v.as_str().map(str::to_owned))
             .unwrap_or_else(|| "system".into()),
@@ -1057,7 +1075,22 @@ impl Service {
                         params: vec![("k", key.to_owned())],
                     }));
                 }
-                "addTasksToTop" | "language" | "focusMode" | "theme" | "dueNotifyTime" => {}
+                "weekStart" if !matches!(value.as_u64(), Some(0 | 1)) => {
+                    return Err(ServiceError::Coded(CodedError {
+                        code: "error.unknownSetting",
+                        message: "weekStart must be 0 or 1".into(),
+                        params: vec![("k", key.to_owned())],
+                    }));
+                }
+                "showMyDayGroupHeadings" if !value.is_boolean() => {
+                    return Err(ServiceError::Coded(CodedError {
+                        code: "error.unknownSetting",
+                        message: "showMyDayGroupHeadings must be a boolean".into(),
+                        params: vec![("k", key.to_owned())],
+                    }));
+                }
+                "addTasksToTop" | "language" | "focusMode" | "theme" | "dueNotifyTime" | "weekStart"
+                | "showMyDayGroupHeadings" => {}
                 _ => {
                     return Err(ServiceError::Coded(CodedError {
                         code: "error.unknownSetting",

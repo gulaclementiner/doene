@@ -19,6 +19,7 @@ doene-notify = { path = "crates/doene-notify" }
 
 [dependencies]
 dirs = { workspace = true }
+sys-locale = "0.3"
 eframe = { workspace = true }
 # Composition root: the binary wires every crate together (docs/plan.md §4).
 doene-core = { workspace = true }

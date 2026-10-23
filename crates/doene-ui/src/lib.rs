@@ -11,6 +11,7 @@ pub mod model;
 pub mod myday;
 pub mod palette;
 pub mod reorder;
+pub mod settings;
 pub mod views;
 
 pub use app::DöneApp;
