@@ -517,3 +517,19 @@ fn fired_set_is_pruned_to_last_500_keys() {
     let keys = doene_storage::aux::fired_keys(st.conn()).unwrap();
     assert_eq!((keys.len(), keys[0].as_str()), (500, "k10"));
 }
+
+#[test]
+fn settings_week_start_notify_time_headings_round_trip_and_validate() {
+    let f = fixture();
+    let s = f.svc.settings().unwrap();
+    assert_eq!((s.week_start, s.due_notify_time.as_str(), s.show_my_day_headings, s.language_chosen), (0, "09:00", true, false));
+    f.svc.set_setting("language", json!("sv")).unwrap();
+    assert_eq!(f.svc.settings().unwrap().week_start, 1);
+    f.svc.set_setting("weekStart", json!(0)).unwrap();
+    f.svc.set_setting("dueNotifyTime", json!("07:30")).unwrap();
+    f.svc.set_setting("showMyDayGroupHeadings", json!(false)).unwrap();
+    let s = f.svc.settings().unwrap();
+    assert_eq!((s.week_start, s.due_notify_time.as_str(), s.show_my_day_headings, s.language_chosen), (0, "07:30", false, true));
+    assert!(f.svc.set_setting("weekStart", json!(2)).is_err());
+    assert!(f.svc.set_setting("showMyDayGroupHeadings", json!("x")).is_err());
+}
