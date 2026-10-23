@@ -217,6 +217,7 @@ mod tests {
         assert_eq!((rows[0].label.as_str(), rows[0].kind.as_str()), ("x", "Uppgift"));
         let r = s.undo().unwrap();
         assert_eq!(undo_message(r, "en"), "Task restored");
+        assert_eq!(undo_message(s.undo().unwrap(), "en"), "Undone"); // the create
         assert_eq!(undo_message(s.undo().unwrap(), "en"), "Nothing to undo");
         assert_eq!(undo_message(Some(UndoKind::Edit), "sv"), "Ångrat");
     }
