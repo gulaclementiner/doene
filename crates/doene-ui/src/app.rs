@@ -9,8 +9,8 @@ use eframe::egui::{self, Color32, RichText};
 use serde_json::json;
 
 use crate::drawer::{
-    ActivityLine, FieldEdit, RecurrenceDraft, StepEdit, StepRow, SubtaskNode, activity_lines, add_subtask,
-    apply_edit, apply_step, load_order, move_section, step_rows, subtask_tree,
+    ActivityLine, FieldEdit, RecurrenceDraft, StepEdit, TagEdit, StepRow, SubtaskNode, activity_lines, add_subtask,
+    apply_edit, apply_step, apply_tag, tag_names, tag_suggestions, load_order, move_section, step_rows, subtask_tree,
 };
 use crate::model::{
     TaskRow, Theme, Toasts, Toggled, TrashRow, delete_with_toast, list_rows, toggle_complete, trash_rows,
@@ -54,6 +54,9 @@ struct Drawer {
     subtasks: Vec<SubtaskNode>,
     new_step: String,
     new_subtask: String,
+    tags: Vec<String>,
+    tag_suggestions: Vec<String>,
+    new_tag: String,
 }
 
 fn nav_key(l: SmartList) -> &'static str {
@@ -136,6 +139,9 @@ impl DöneApp {
             subtasks: subtask_tree(&self.service, id),
             new_step: self.drawer.as_ref().filter(|d| d.id == id).map(|d| d.new_step.clone()).unwrap_or_default(),
             new_subtask: self.drawer.as_ref().filter(|d| d.id == id).map(|d| d.new_subtask.clone()).unwrap_or_default(),
+            tags: tag_names(&self.service, id),
+            tag_suggestions: tag_suggestions(&self.service, id),
+            new_tag: self.drawer.as_ref().filter(|d| d.id == id).map(|d| d.new_tag.clone()).unwrap_or_default(),
         });
     }
 
@@ -347,6 +353,7 @@ impl DöneApp {
         let mut edit = None;
         let mut step_edit: Option<StepEdit> = None;
         let mut sub_add: Option<String> = None;
+        let mut tag_edit: Option<TagEdit> = None;
         let mut sub_toggle: Option<(String, bool)> = None;
         let mut open_sub: Option<String> = None;
         let mut close = false;
@@ -504,7 +511,32 @@ impl DöneApp {
                             r.request_focus();
                         }
                     }
-                    // Tags, references and completion arrive in later tickets.
+                    "tags" => {
+                        ui.label(RichText::new(t("section.tags")).strong());
+                        ui.horizontal_wrapped(|ui| {
+                            for g in &d.tags {
+                                let p = HashMap::from([("tag".to_owned(), Some(g.clone()))]);
+                                ui.label(format!("#{g}"));
+                                if ui.small_button("✕").on_hover_text(tr("drawer.removeTag", &p, Some(&locale))).clicked() {
+                                    tag_edit = Some(TagEdit::Remove(g.clone()));
+                                }
+                            }
+                        });
+                        let r = ui.add(egui::TextEdit::singleline(&mut d.new_tag).hint_text(t("drawer.addTagExample")).desired_width(f32::INFINITY));
+                        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && !d.new_tag.trim().is_empty() {
+                            tag_edit = Some(TagEdit::Add(std::mem::take(&mut d.new_tag)));
+                            r.request_focus();
+                        }
+                        let needle = d.new_tag.trim().trim_start_matches(['#', '@']).to_lowercase();
+                        ui.horizontal_wrapped(|ui| {
+                            for g in d.tag_suggestions.iter().filter(|g| g.contains(&needle)).take(8) {
+                                if ui.small_button(format!("#{g}")).clicked() {
+                                    tag_edit = Some(TagEdit::Add(g.clone()));
+                                }
+                            }
+                        });
+                    }
+                    // References and completion arrive in later tickets.
                     _ => {}
                 }
                 ui.add_space(6.0);
@@ -530,6 +562,9 @@ impl DöneApp {
         }
         if let Some(e) = step_edit {
             self.drawer_action(|s, id, l| apply_step(s, id, e, l));
+        }
+        if let Some(e) = tag_edit {
+            self.drawer_action(|s, id, l| apply_tag(s, id, e, l));
         }
         if let Some(sub) = sub_add {
             self.drawer_action(|s, id, l| add_subtask(s, id, &sub, l));
