@@ -4,7 +4,9 @@
 //! deliberately small: entities, read-model builders, and pure rule functions.
 
 pub mod dates;
+pub mod dnd;
 pub mod entities;
+pub mod tree;
 
 pub use dates::{Date, InvalidDate};
 pub use entities::{
