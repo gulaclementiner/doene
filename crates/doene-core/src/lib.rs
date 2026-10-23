@@ -3,6 +3,8 @@
 //! No I/O, no UI dependencies (docs/plan.md §3). The public API is
 //! deliberately small: entities, read-model builders, and pure rule functions.
 
+pub mod agenda;
+pub mod agenda_order;
 pub mod dates;
 pub mod dnd;
 pub mod entities;
@@ -12,10 +14,18 @@ pub mod labels;
 pub mod nlp;
 pub mod quickadd;
 pub mod recurrence;
+pub mod smartlists;
 pub mod search;
 pub mod tree;
 pub mod view_rules;
 
+pub use agenda::{
+    DEFAULT_SORT, FocusMode, GroupKey, SortOrder, SortSpec, is_picked,
+};
+pub use agenda_order::{
+    AgendaLayoutSave, DEFAULT_ORDER, GROUP_KEYS, ORDER_KEYS, SECTION_BREAK, agenda_layout_save,
+    agenda_order_for, clean_agenda_order, default_order,
+};
 pub use dates::{Date, InvalidDate};
 pub use dnd::{DropOutcome, DropZone, GroupRect, TASK_EDGE};
 pub use entities::{
@@ -25,6 +35,7 @@ pub use entities::{
 pub use errors::CodedError;
 pub use nlp::{ParseOptions, ParsedQuickAdd, parse_quick_add};
 pub use recurrence::{RawRecurrence, TYPES, next_date, next_on_or_after, validate};
+pub use smartlists::{SMART, SmartList, SmartSettings, smart_tasks, visible_order};
 pub use search::{score, search_tasks};
 pub use tree::ParentMap;
 pub use view_rules::{

@@ -99,6 +99,17 @@ an entry here (docs/plan.md §3).
 - **Pinning tests:** `i18n::tests::detect_language_picks_the_best_supported_language_by_q_value`,
   `i18n::tests::detect_language_handles_missing_or_empty_input`.
 
+## D7 — Agenda/smart-list API shape (note, not a behaviour change)
+
+- **What diverged:** Gör't's `smartTasks(id, ...)` takes a string id and
+  `settings` bag; Döne uses a `SmartList` enum, a typed `SmartSettings`, and
+  returns borrowed tasks. Unknown ids surface via `SmartList::parse`
+  (`error.unknownSmartList`, param `id`), and an unknown agenda group key is an
+  `UnknownGroup` error. `sort_tasks` has no `low` importance rank because
+  `Importance` has only `Normal`/`High`.
+- **Why:** type safety; membership, ordering and expiry behaviour are unchanged.
+- **Pinning tests:** `smartlists::tests::*`, `agenda::tests::*`.
+
 ## D6 — Impossible ISO dates in quick-add text stay in the subject
 
 - **What diverged:** Gör't's NLP accepts an explicit `YYYY-MM-DD` token as a due
