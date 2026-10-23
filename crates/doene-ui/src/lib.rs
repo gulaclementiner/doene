@@ -1,11 +1,11 @@
 //! Döne UI: the eframe/egui application (docs/plan.md §8).
 //!
-//! Depends on `doene-service` (+ `doene-core` for types) only. The single
-//! `AppState` and its modules land in M3; this crate is scaffolding until then.
+//! Depends on `doene-service` (+ `doene-core` for types) only. Structure:
+//! `model` holds plain, unit-tested view-model logic; `app` holds the single
+//! `DöneApp` state and egui rendering (thin, not unit-tested).
 
-/// The Döne window. M0: an empty app that opens and closes cleanly.
-pub struct DöneApp;
+mod app;
+pub mod model;
 
-impl eframe::App for DöneApp {
-    fn ui(&mut self, _ui: &mut eframe::egui::Ui, _frame: &mut eframe::Frame) {}
-}
+pub use app::DöneApp;
+pub use model::{TaskRow, Theme, list_rows};
