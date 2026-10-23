@@ -5,6 +5,7 @@ edition = "2024"
 description = "Döne pure domain logic and entities — no I/O, no UI dependencies"
 
 [dependencies]
+regex = "1.13.1"
 # Intentionally empty: the core is pure (docs/plan.md §3).
 
 [dev-dependencies]

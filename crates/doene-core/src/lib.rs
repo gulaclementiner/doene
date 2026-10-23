@@ -20,6 +20,6 @@ pub use entities::{
     TaskStatus, TrashEntry, TrashKind, View, Weekday,
 };
 pub use errors::CodedError;
-pub use nlp::{ParsedQuickAdd, ParseOptions, parse_quick_add};
+pub use nlp::{ParseOptions, ParsedQuickAdd, parse_quick_add};
 pub use recurrence::{RawRecurrence, TYPES, next_date, next_on_or_after, validate};
 pub use tree::ParentMap;
