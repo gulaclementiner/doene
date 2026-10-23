@@ -7,6 +7,7 @@
 mod app;
 pub mod drawer;
 pub mod model;
+pub mod views;
 
 pub use app::DöneApp;
 pub use model::{TaskRow, Theme, list_rows};

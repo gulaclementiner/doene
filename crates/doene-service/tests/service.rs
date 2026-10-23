@@ -400,3 +400,93 @@ fn drawer_pref_persists_and_validates_scope() {
     assert_eq!(f.svc.set_pref("other", "x").unwrap_err().code(), Some("error.unknownPrefScope"));
     assert_eq!(f.svc.set_pref("drawer:abc", " ").unwrap_err().code(), Some("error.prefValueRequired"));
 }
+
+// ---- ticket #16: views
+
+fn raw_view(name: &str) -> doene_core::RawView {
+    doene_core::RawView { name: Some(name.into()), ..Default::default() }
+}
+
+fn sort(by: &str, dir: &str) -> doene_core::RawSortLevel {
+    doene_core::RawSortLevel { by: by.into(), dir: Some(dir.into()) }
+}
+
+#[test]
+fn view_create_validates_and_persists_all_fields() {
+    let f = fixture();
+    assert_eq!(code(f.svc.create_view(raw_view("  "))), "error.viewNameRequired");
+    let mut bad = raw_view("x");
+    bad.match_mode = Some("some".into());
+    assert_eq!(code(f.svc.create_view(bad)), "error.viewMatchInvalid");
+    let mut bad = raw_view("x");
+    bad.sorts = vec![sort("zzz", "asc")];
+    assert_eq!(code(f.svc.create_view(bad)), "error.viewSortInvalidKey");
+    let mut bad = raw_view("x");
+    bad.sorts = (0..7).map(|_| sort("name", "asc")).collect();
+    assert_eq!(code(f.svc.create_view(bad)), "error.viewSortTooMany");
+    assert!(f.svc.views().unwrap().is_empty());
+
+    let mut r = raw_view(" Work ");
+    r.emoji = Some("💼".into());
+    r.tags = vec!["#Work".into(), "work".into(), "Big Job".into()];
+    r.match_mode = Some("all".into());
+    r.show_done = true;
+    r.sorts = (0..6).map(|i| sort(["name", "due", "created", "name", "due", "created"][i], "desc")).collect();
+    let v = f.svc.create_view(r).unwrap();
+    let got = &f.svc.views().unwrap()[0];
+    assert_eq!(*got, v);
+    assert_eq!(got.view.name, "Work");
+    assert_eq!(got.view.emoji.as_deref(), Some("💼"));
+    let tags: Vec<_> = got.view.tags.iter().map(|t| t.as_str()).collect();
+    assert_eq!(tags, ["big-job", "work"]);
+    assert!(got.view.show_done);
+    assert_eq!(got.sorts.len(), 6);
+}
+
+#[test]
+fn view_update_delete_restore_and_undo() {
+    let f = fixture();
+    let a = f.svc.create_view(raw_view("A")).unwrap();
+    let mut r = raw_view("A2");
+    r.sorts = vec![sort("manual", "desc")];
+    let u = f.svc.update_view(&a.view.id, r).unwrap();
+    assert_eq!(u.view.name, "A2");
+    assert_eq!(u.sorts[0].dir, doene_core::SortDirection::Asc);
+    assert_eq!(code(f.svc.update_view("nope", raw_view("x"))), "error.notFound");
+    assert_eq!(code(f.svc.update_view(&a.view.id, raw_view(""))), "error.viewNameRequired");
+
+    f.svc.undo().unwrap();
+    assert_eq!(f.svc.views().unwrap()[0].view.name, "A");
+
+    let trash_id = f.svc.delete_view(&a.view.id).unwrap();
+    assert!(f.svc.views().unwrap().is_empty());
+    assert_eq!(f.svc.trash().unwrap()[0].kind, TrashKind::View);
+    assert_eq!(code(f.svc.delete_view(&a.view.id)), "error.notFound");
+    f.svc.undo().unwrap();
+    assert_eq!(f.svc.views().unwrap().len(), 1);
+
+    f.svc.delete_view(&a.view.id).unwrap();
+    let id = f.svc.trash().unwrap()[0].id.clone();
+    assert_ne!(id, trash_id);
+    assert!(matches!(f.svc.restore(&id).unwrap(), Restored::View { .. }));
+    assert_eq!(f.svc.views().unwrap()[0].view.name, "A");
+    assert!(f.svc.trash().unwrap().is_empty());
+}
+
+#[test]
+fn view_move_renumbers_gap_free() {
+    let f = fixture();
+    let ids: Vec<String> = ["A", "B", "C"].iter().map(|n| f.svc.create_view(raw_view(n)).unwrap().view.id).collect();
+    f.svc.move_view(&ids[2], 0).unwrap();
+    let vs = f.svc.views().unwrap();
+    let names: Vec<_> = vs.iter().map(|v| v.view.name.as_str()).collect();
+    assert_eq!(names, ["C", "A", "B"]);
+    let pos: Vec<_> = vs.iter().map(|v| v.view.position).collect();
+    assert_eq!(pos, [1.0, 2.0, 3.0]);
+    f.svc.move_view(&ids[2], 99).unwrap();
+    let names: Vec<_> = f.svc.views().unwrap().iter().map(|v| v.view.name.clone()).collect();
+    assert_eq!(names, ["A", "B", "C"]);
+    assert_eq!(code(f.svc.move_view("nope", 0)), "error.notFound");
+    f.svc.undo().unwrap();
+    assert_eq!(f.svc.views().unwrap()[0].view.name, "C");
+}

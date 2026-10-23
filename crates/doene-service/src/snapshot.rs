@@ -5,6 +5,8 @@ use doene_core::{
     Date, HydratedTask, Importance, RecurrenceRule, RecurrenceType, RecurrenceUnit, Step, Tag,
     Task, TaskStatus, Weekday,
 };
+use doene_core::{MatchMode, SortDirection, SortKey, SortLevel, View};
+use doene_storage::views::SavedView;
 use serde_json::{Value, json};
 
 fn status(s: TaskStatus) -> &'static str {
@@ -106,4 +108,49 @@ pub fn task_from_json(v: &Value) -> Option<HydratedTask> {
         })
         .unwrap_or_default();
     Some(HydratedTask { task, tags, steps })
+}
+
+pub fn view_json(v: &SavedView) -> Value {
+    json!({
+        "id": v.view.id, "name": v.view.name, "emoji": v.view.emoji,
+        "match": if v.view.match_mode == MatchMode::All { "all" } else { "any" },
+        "show_done": v.view.show_done, "position": v.view.position,
+        "tags": v.view.tags.iter().map(Tag::as_str).collect::<Vec<_>>(),
+        "sorts": v.sorts.iter().map(|s| json!({
+            "by": match s.by { SortKey::Name => "name", SortKey::Due => "due", SortKey::Created => "created", SortKey::Manual => "manual" },
+            "dir": if s.dir == SortDirection::Desc { "desc" } else { "asc" },
+        })).collect::<Vec<_>>(),
+    })
+}
+
+pub fn view_from_json(v: &Value) -> Option<SavedView> {
+    Some(SavedView {
+        view: View {
+            id: opt_str(v, "id")?,
+            name: opt_str(v, "name")?,
+            emoji: opt_str(v, "emoji"),
+            match_mode: if v.get("match").and_then(Value::as_str) == Some("all") { MatchMode::All } else { MatchMode::Any },
+            show_done: v.get("show_done").and_then(Value::as_bool).unwrap_or(false),
+            position: v.get("position").and_then(Value::as_f64).unwrap_or(0.0),
+            tags: v
+                .get("tags")
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter_map(|t| t.as_str().and_then(|s| Tag::new(s).ok())).collect())
+                .unwrap_or_default(),
+        },
+        sorts: v
+            .get("sorts")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(|s| {
+                        Some(SortLevel {
+                            by: SortKey::from_token(s.get("by")?.as_str()?)?,
+                            dir: if s.get("dir").and_then(Value::as_str) == Some("desc") { SortDirection::Desc } else { SortDirection::Asc },
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+    })
 }

@@ -75,19 +75,22 @@ pub fn list_rows(
     sorted
         .into_iter()
         .filter_map(|t| tasks.iter().find(|h| h.task.id == t.id))
-        .map(|h| {
-            let t = &h.task;
-            TaskRow {
-                id: t.id.clone(),
-                subject: t.subject.clone(),
-                completed: t.status == TaskStatus::Completed,
-                important: t.importance == Importance::High,
-                due: t.due_date.map(|d| due_label(&d.to_string(), &today_s, Some(locale))),
-                overdue: t.due_date.is_some_and(|d| d < today) && t.status != TaskStatus::Completed,
-                tags: h.tags.iter().map(|g| format!("#{}", g.as_str())).collect(),
-            }
-        })
+        .map(|h| task_row(h, today, &today_s, locale))
         .collect()
+}
+
+/// One task as a rendered row.
+pub fn task_row(h: &HydratedTask, today: Date, today_s: &str, locale: &str) -> TaskRow {
+    let t = &h.task;
+    TaskRow {
+        id: t.id.clone(),
+        subject: t.subject.clone(),
+        completed: t.status == TaskStatus::Completed,
+        important: t.importance == Importance::High,
+        due: t.due_date.map(|d| due_label(&d.to_string(), today_s, Some(locale))),
+        overdue: t.due_date.is_some_and(|d| d < today) && t.status != TaskStatus::Completed,
+        tags: h.tags.iter().map(|g| format!("#{}", g.as_str())).collect(),
+    }
 }
 
 /// What a completion toggle did, for the caller's feedback (toast in #12).
