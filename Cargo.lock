@@ -862,6 +862,7 @@ dependencies = [
  "doene-storage",
  "doene-ui",
  "eframe",
+ "sys-locale",
 ]
 
 [[package]]

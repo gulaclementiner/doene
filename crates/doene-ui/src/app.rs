@@ -63,6 +63,12 @@ pub struct DöneApp {
     my_day: Option<MyDayView>,
     my_day_order: Vec<String>,
     layout_open: bool,
+    week_start: u8,
+    show_headings: bool,
+    notify_time: String,
+    notify_input: String,
+    settings_open: bool,
+    settings_error: Option<String>,
     notifier: Option<NotifyHook>,
     /// The task Alt+arrows act on (last opened/clicked task).
     selected: Option<String>,
@@ -130,6 +136,12 @@ impl DöneApp {
             selected: None,
             dragging: None,
             layout_open: false,
+            week_start: 0,
+            show_headings: true,
+            notify_time: String::new(),
+            notify_input: String::new(),
+            settings_open: false,
+            settings_error: None,
             notifier: None,
         };
         app.reload();
@@ -195,6 +207,12 @@ impl DöneApp {
             Ok((s, tasks)) => {
                 self.theme = Theme::parse(&s.theme);
                 self.locale = s.language.clone();
+                self.week_start = s.week_start;
+                self.show_headings = s.show_my_day_headings;
+                if self.notify_time != s.due_notify_time {
+                    self.notify_time = s.due_notify_time.clone();
+                    self.notify_input = s.due_notify_time.clone();
+                }
                 let settings = SmartSettings { focus_mode: s.focus_mode, ..Default::default() };
                 self.trash = self.service.trash().map(|t| trash_rows(&t, &self.locale)).unwrap_or_default();
                 self.views = self.service.views().unwrap_or_default();
@@ -522,6 +540,67 @@ impl DöneApp {
         }
         if open {
             self.palette = Some((query, sel));
+        }
+    }
+
+    /// The settings popover: language, week start, notification time, headings.
+    fn settings_window(&mut self, ctx: &egui::Context) {
+        if !self.settings_open {
+            return;
+        }
+        let mut open = true;
+        let mut reload = false;
+        let title = self.t("settings.preferencesTitle");
+        egui::Window::new(title).open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
+            ui.label(RichText::new(self.t("settings.language")).strong());
+            ui.horizontal(|ui| {
+                for l in crate::settings::languages() {
+                    let label = self.t(&crate::settings::language_label_key(l));
+                    if ui.selectable_label(self.locale == l, label).clicked() && self.locale != l {
+                        self.settings_error = crate::settings::set_language(&self.service, l).err().map(|e| crate::drawer::error_message(&e, &self.locale));
+                        reload = true;
+                    }
+                }
+            });
+            ui.add_space(6.0);
+            ui.label(RichText::new(self.t("settings.startOfWeek")).strong());
+            ui.horizontal(|ui| {
+                for (v, k) in [(1u8, "settings.startOfWeek.mon"), (0, "settings.startOfWeek.sun")] {
+                    if ui.selectable_label(self.week_start == v, self.t(k)).clicked() && self.week_start != v {
+                        self.settings_error = crate::settings::set_week_start(&self.service, v).err().map(|e| crate::drawer::error_message(&e, &self.locale));
+                        reload = true;
+                    }
+                }
+            });
+            ui.add_space(6.0);
+            ui.label(RichText::new(self.t("settings.dueNotifyTime")).strong());
+            let r = ui.add(egui::TextEdit::singleline(&mut self.notify_input).desired_width(60.0));
+            if r.lost_focus() && self.notify_input != self.notify_time {
+                match crate::settings::set_notify_time(&self.service, &self.notify_input, &self.locale) {
+                    Ok(_) => self.settings_error = None,
+                    Err(m) => {
+                        self.settings_error = Some(m);
+                        self.notify_input = self.notify_time.clone();
+                    }
+                }
+                reload = true;
+            }
+            ui.add_space(6.0);
+            ui.label(RichText::new(self.t("settings.myDay")).strong());
+            let mut show = self.show_headings;
+            if ui.checkbox(&mut show, self.t("settings.myDaySubHeadings")).changed() {
+                self.settings_error = crate::settings::set_headings(&self.service, show).err().map(|e| crate::drawer::error_message(&e, &self.locale));
+                reload = true;
+            }
+            if let Some(e) = &self.settings_error {
+                ui.colored_label(Color32::from_rgb(0xd6, 0x45, 0x45), e);
+            }
+        });
+        if !open {
+            self.settings_open = false;
+        }
+        if reload {
+            self.reload();
         }
     }
 
@@ -863,7 +942,7 @@ impl DöneApp {
                             });
                             if d.rec.unit == "week" {
                                 ui.horizontal(|ui| {
-                                    for (dow, k) in [1u8, 2, 3, 4, 5, 6, 0].into_iter().map(|n| (n, weekday_keys[n as usize])) {
+                                    for (dow, k) in crate::settings::weekday_order(self.week_start).into_iter().map(|n| (n, weekday_keys[n as usize])) {
                                         let on = d.rec.days.contains(&dow);
                                         if ui.selectable_label(on, t(&format!("weekday.{k}"))).clicked() {
                                             d.rec.toggle_day(dow);
@@ -1055,6 +1134,9 @@ impl eframe::App for DöneApp {
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                 ui.add_space(8.0);
                 let mut chosen = None;
+                if ui.selectable_label(self.settings_open, format!("⚙ {}", self.t("nav.preferences"))).clicked() {
+                    self.settings_open = !self.settings_open;
+                }
                 ui.horizontal(|ui| {
                     for th in Theme::ALL {
                         let short = match th {
@@ -1076,6 +1158,8 @@ impl eframe::App for DöneApp {
                 }
             });
         });
+
+        self.settings_window(ui.ctx());
 
         if self.drawer.is_some() && !self.show_trash {
             if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !ctx.egui_wants_keyboard_input() {
@@ -1145,7 +1229,9 @@ impl eframe::App for DöneApp {
                         ui.add_space(4.0);
                         ui.label(RichText::new(tt(s.title_key)).strong());
                         for g in &s.groups {
-                            ui.label(RichText::new(tt(&g.title_key)).small().weak());
+                            if let Some(k) = crate::settings::group_heading_key(self.show_headings, &g.title_key) {
+                                ui.label(RichText::new(tt(&k)).small().weak());
+                            }
                             for r in &g.rows {
                                 task_row_ui(ui, r, &locale, &mut clicked, &mut deleted, &mut opened, None);
                             }
