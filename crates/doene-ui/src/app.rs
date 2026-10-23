@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use doene_core::i18n::tr;
 use doene_core::{SMART, SmartList, SmartSettings};
-use doene_service::Service;
+use doene_service::{SavedView, Service};
 use eframe::egui::{self, Color32, RichText};
 use serde_json::json;
 
@@ -12,6 +12,7 @@ use crate::drawer::{
     ActivityLine, FieldEdit, RecurrenceDraft, StepEdit, TagEdit, StepRow, SubtaskNode, activity_lines, add_subtask,
     apply_edit, apply_step, apply_tag, tag_names, tag_suggestions, load_order, move_section, step_rows, subtask_tree,
 };
+use crate::views::{SortDraft, ViewDraft, describe, drop_index, rail_rows, sort_key_label, view_rows};
 use crate::model::{
     TaskRow, Theme, Toasts, Toggled, TrashRow, delete_with_toast, list_rows, toggle_complete, trash_rows,
     undo_message,
@@ -36,6 +37,11 @@ pub struct DöneApp {
     rows: Vec<TaskRow>,
     applied_theme: Option<Theme>,
     drawer: Option<Drawer>,
+    views: Vec<SavedView>,
+    /// The open custom view (its id), if the list shown is a view.
+    view: Option<String>,
+    form: Option<ViewDraft>,
+    form_error: Option<String>,
 }
 
 /// Open drawer state: edit buffers for one task.
@@ -87,6 +93,10 @@ impl DöneApp {
             rows: vec![],
             applied_theme: None,
             drawer: None,
+            views: vec![],
+            view: None,
+            form: None,
+            form_error: None,
         };
         app.reload();
         app
@@ -108,7 +118,14 @@ impl DöneApp {
                 self.locale = s.language.clone();
                 let settings = SmartSettings { focus_mode: s.focus_mode, ..Default::default() };
                 self.trash = self.service.trash().map(|t| trash_rows(&t, &self.locale)).unwrap_or_default();
-                self.rows = list_rows(self.list, &tasks, self.service.today(), settings, &self.locale);
+                self.views = self.service.views().unwrap_or_default();
+                if self.view.as_ref().is_some_and(|id| !self.views.iter().any(|v| &v.view.id == id)) {
+                    self.view = None;
+                }
+                self.rows = match self.views.iter().find(|v| Some(&v.view.id) == self.view.as_ref()) {
+                    Some(v) => view_rows(v, &tasks, self.service.today(), &self.locale),
+                    None => list_rows(self.list, &tasks, self.service.today(), settings, &self.locale),
+                };
                 if let Some(id) = self.drawer.as_ref().map(|d| d.id.clone()) {
                     self.open_drawer(&id);
                 }
@@ -181,7 +198,7 @@ impl DöneApp {
         if text.trim().is_empty() {
             return;
         }
-        match self.service.quick_add(&text, None, false) {
+        match self.service.quick_add(&text, self.view.clone().map(doene_core::quickadd::QuickAddView::Custom).as_ref(), false) {
             Ok(_) => self.error = None,
             Err(e) => {
                 self.error = Some(e.to_string());
@@ -313,6 +330,191 @@ enum TrashAction {
 }
 
 impl DöneApp {
+    fn open_form(&mut self, draft: Option<ViewDraft>) {
+        self.form = Some(draft.unwrap_or_default());
+        self.form_error = None;
+        self.show_trash = false;
+    }
+
+    /// Custom views in the rail: emoji + colour, click to open, drag to reorder.
+    fn views_rail_ui(&mut self, ui: &mut egui::Ui) {
+        let rows = rail_rows(&self.views);
+        let mut open = None;
+        let mut moved = None;
+        let mut rects: Vec<(f32, f32)> = vec![];
+        for (i, r) in rows.iter().enumerate() {
+            let color = Color32::from_rgb(r.color[0], r.color[1], r.color[2]);
+            let selected = !self.show_trash && self.view.as_deref() == Some(r.id.as_str());
+            let resp = ui
+                .horizontal(|ui| {
+                    ui.label(RichText::new(&r.icon).color(color));
+                    ui.add(egui::Button::selectable(selected, RichText::new(&r.name)).sense(egui::Sense::click_and_drag()))
+                })
+                .inner;
+            rects.push((resp.rect.top(), resp.rect.bottom()));
+            if resp.clicked() {
+                open = Some(r.id.clone());
+            }
+            if resp.drag_stopped() {
+                if let Some(p) = ui.input(|i| i.pointer.interact_pos()) {
+                    moved = Some((i, p.y));
+                }
+            }
+        }
+        if let Some(id) = open {
+            self.view = Some(id);
+            self.show_trash = false;
+            self.form = None;
+            self.reload();
+        }
+        if let Some((from, y)) = moved {
+            let to = drop_index(&rects, from, y);
+            if to != from {
+                match self.service.move_view(&rows[from].id, to) {
+                    Ok(()) => self.error = None,
+                    Err(e) => self.error = Some(e.to_string()),
+                }
+                self.reload();
+            }
+        }
+        if ui.button(format!("+ {}", self.t("nav.newView"))).clicked() {
+            self.open_form(None);
+        }
+    }
+
+    fn save_form(&mut self) {
+        let Some(form) = self.form.clone() else { return };
+        if let Err(m) = form.validate(&self.locale) {
+            self.form_error = Some(m);
+            return;
+        }
+        match form.save(&self.service) {
+            Ok(id) => {
+                self.view = Some(id);
+                self.form = None;
+                self.form_error = None;
+            }
+            Err(e) => self.form_error = Some(crate::drawer::error_message(&e, &self.locale)),
+        }
+        self.reload();
+    }
+
+    fn delete_form_view(&mut self) {
+        let Some(id) = self.form.as_ref().and_then(|f| f.id.clone()) else { return };
+        match self.service.delete_view(&id) {
+            Ok(_) => {
+                let m = self.t("trash.deleted");
+                self.toasts.push(m, true, self.now);
+                self.form = None;
+                self.view = None;
+            }
+            Err(e) => self.form_error = Some(crate::drawer::error_message(&e, &self.locale)),
+        }
+        self.reload();
+    }
+
+    fn view_form_ui(&mut self, ui: &mut egui::Ui) {
+        let Some(mut f) = self.form.take() else { return };
+        let (mut save, mut cancel, mut delete) = (false, false, false);
+        let editing = f.id.is_some();
+        ui.heading(self.t(if editing { "viewForm.editViewTitle" } else { "viewForm.newViewTitle" }));
+        ui.add_space(6.0);
+        egui::Grid::new("view_form").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
+            ui.label(self.t("viewForm.name"));
+            ui.text_edit_singleline(&mut f.name);
+            ui.end_row();
+            ui.label(self.t("viewForm.emoji"));
+            ui.add(egui::TextEdit::singleline(&mut f.emoji).desired_width(60.0));
+            ui.end_row();
+            ui.label(self.t("viewForm.tags"));
+            ui.vertical(|ui| {
+                if f.tags.is_empty() {
+                    ui.weak(self.t("viewForm.tagListEmpty"));
+                }
+                let mut remove = None;
+                ui.horizontal_wrapped(|ui| {
+                    for (i, t) in f.tags.iter().enumerate() {
+                        if ui.small_button(format!("#{t} ✕")).on_hover_text(self.t("viewForm.removeTag")).clicked() {
+                            remove = Some(i);
+                        }
+                    }
+                });
+                if let Some(i) = remove {
+                    f.tags.remove(i);
+                }
+                let hint = self.t("viewForm.tagPlaceholder");
+                let r = ui.add(egui::TextEdit::singleline(&mut f.new_tag).hint_text(hint));
+                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    f.commit_tag();
+                    r.request_focus();
+                }
+            });
+            ui.end_row();
+            ui.label(self.t("viewForm.match"));
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut f.all, false, self.t("viewForm.any"));
+                ui.selectable_value(&mut f.all, true, self.t("viewForm.all"));
+            });
+            ui.end_row();
+            ui.label(self.t("viewForm.sort"));
+            ui.vertical(|ui| {
+                let mut remove = None;
+                for (i, s) in f.sorts.iter_mut().enumerate() {
+                    ui.horizontal(|ui| {
+                        egui::ComboBox::from_id_salt(("sort_by", i))
+                            .selected_text(self.t(sort_key_label(s.by)))
+                            .show_ui(ui, |ui| {
+                                for k in doene_core::SortKey::ALL {
+                                    ui.selectable_value(&mut s.by, k, self.t(sort_key_label(k)));
+                                }
+                            });
+                        if s.by != doene_core::SortKey::Manual {
+                            let label = self.t(if s.desc { "viewForm.descending" } else { "viewForm.ascending" });
+                            if ui.button(label).clicked() {
+                                s.desc = !s.desc;
+                            }
+                        }
+                        if ui.small_button("✕").on_hover_text(self.t("viewForm.removeSort")).clicked() {
+                            remove = Some(i);
+                        }
+                    });
+                }
+                if let Some(i) = remove {
+                    f.remove_sort(i);
+                }
+                if f.sorts.len() < doene_core::MAX_SORTS && ui.button(self.t("viewForm.addSort")).clicked() {
+                    f.sorts.push(SortDraft { by: doene_core::SortKey::Name, desc: false });
+                }
+            });
+            ui.end_row();
+            ui.label("");
+            ui.checkbox(&mut f.show_done, self.t("viewForm.showDone"));
+            ui.end_row();
+        });
+        ui.add_space(4.0);
+        ui.weak(describe(&f, &self.locale));
+        if let Some(e) = &self.form_error {
+            ui.colored_label(Color32::from_rgb(0xd6, 0x45, 0x45), e);
+        }
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            save = ui.button(self.t("viewForm.save")).clicked();
+            cancel = ui.button(self.t("viewForm.cancel")).clicked();
+            if editing {
+                delete = ui.button(self.t("viewForm.delete")).clicked();
+            }
+        });
+        self.form = Some(f);
+        if save {
+            self.save_form();
+        } else if delete {
+            self.delete_form_view();
+        } else if cancel {
+            self.form = None;
+            self.form_error = None;
+        }
+    }
+
     fn trash_ui(&mut self, ui: &mut egui::Ui) {
         ui.heading(self.t("trash.title"));
         ui.label(RichText::new(self.t("trash.emptyHint")).small().weak());
@@ -592,12 +794,15 @@ impl eframe::App for DöneApp {
             ui.heading("Döne");
             ui.add_space(8.0);
             for l in SMART {
-                if ui.selectable_label(!self.show_trash && self.list == l, self.t(nav_key(l))).clicked() {
+                if ui.selectable_label(!self.show_trash && self.view.is_none() && self.list == l, self.t(nav_key(l))).clicked() {
                     self.list = l;
+                    self.view = None;
                     self.show_trash = false;
                     self.reload();
                 }
             }
+            ui.separator();
+            self.views_rail_ui(ui);
             ui.separator();
             let label = format!("🗑 {}", self.t("trash.title"));
             if ui.selectable_label(self.show_trash, label).clicked() {
@@ -641,7 +846,22 @@ impl eframe::App for DöneApp {
                 self.trash_ui(ui);
                 return;
             }
-            ui.heading(self.t(if self.list == SmartList::All { "nav.allTitle" } else { nav_key(self.list) }));
+            if self.form.is_some() {
+                self.view_form_ui(ui);
+                return;
+            }
+            let title = match self.views.iter().find(|v| Some(&v.view.id) == self.view.as_ref()) {
+                Some(v) => format!("{} {}", v.view.emoji.clone().unwrap_or_default(), v.view.name).trim().to_owned(),
+                None => self.t(if self.list == SmartList::All { "nav.allTitle" } else { nav_key(self.list) }),
+            };
+            ui.horizontal(|ui| {
+                ui.heading(title);
+                if let Some(id) = self.view.clone() {
+                    if ui.small_button("✎").on_hover_text(self.t("viewForm.editView")).clicked() {
+                        self.open_form(self.views.iter().find(|v| v.view.id == id).map(ViewDraft::from_view));
+                    }
+                }
+            });
             ui.add_space(6.0);
             let hint = self.t("composer.placeholder");
             let resp = ui.add(

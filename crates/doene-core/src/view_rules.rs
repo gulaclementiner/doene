@@ -22,6 +22,9 @@ pub enum SortKey {
 }
 
 impl SortKey {
+    /// Every key in picker order.
+    pub const ALL: [SortKey; 4] = [Self::Name, Self::Due, Self::Created, Self::Manual];
+
     /// Parse a Gör't token; `None` for unknown keys.
     pub fn from_token(token: &str) -> Option<Self> {
         match token {
