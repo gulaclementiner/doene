@@ -397,6 +397,8 @@ fn drawer_pref_persists_and_validates_scope() {
     f.svc.set_pref("drawer:abc", r#"["notes","tags"]"#).unwrap();
     f.svc.set_pref("drawer:abc", r#"["tags","notes"]"#).unwrap();
     assert_eq!(f.svc.pref("drawer:abc").unwrap().as_deref(), Some(r#"["tags","notes"]"#));
+    f.svc.set_pref("global", r#"{"myDayGroupOrder":["radar"]}"#).unwrap();
+    assert_eq!(f.svc.pref("global").unwrap().as_deref(), Some(r#"{"myDayGroupOrder":["radar"]}"#));
     assert_eq!(f.svc.set_pref("other", "x").unwrap_err().code(), Some("error.unknownPrefScope"));
     assert_eq!(f.svc.set_pref("drawer:abc", " ").unwrap_err().code(), Some("error.prefValueRequired"));
 }

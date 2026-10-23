@@ -975,10 +975,11 @@ impl Service {
         Ok(aux::pref(self.storage.conn(), scope)?)
     }
 
-    /// Save a pref. Scopes are `drawer:<taskId>`; the value must be non-empty.
+    /// Save a pref. Scopes are `drawer:<taskId>` and `global` (My Day group order); the value must be non-empty.
     /// Not undoable: layout prefs do not touch task/trash state.
     pub fn set_pref(&self, scope: &str, value: &str) -> Res<()> {
-        if !scope.starts_with("drawer:") || scope.len() == "drawer:".len() {
+        let drawer_scope = scope.starts_with("drawer:") && scope.len() > "drawer:".len();
+        if !drawer_scope && scope != "global" {
             return Err(ServiceError::Coded(CodedError {
                 code: "error.unknownPrefScope",
                 message: "unknown preference scope".into(),

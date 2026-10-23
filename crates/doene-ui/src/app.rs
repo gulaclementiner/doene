@@ -13,6 +13,7 @@ use crate::drawer::{
     apply_edit, apply_step, apply_tag, tag_names, tag_suggestions, load_order, move_section, step_rows, subtask_tree,
 };
 use crate::palette::{self, Action, Command};
+use crate::myday::{MyDayView, load_my_day_order, move_my_day_item, my_day_view, order_item_key};
 use crate::views::{SortDraft, ViewDraft, describe, drop_index, rail_rows, sort_key_label, view_rows};
 use crate::model::{
     TaskRow, Theme, Toasts, Toggled, TrashRow, delete_with_toast, list_rows, toggle_complete, trash_rows,
@@ -46,6 +47,10 @@ pub struct DöneApp {
     /// Open palette: (query, highlighted index).
     palette: Option<(String, usize)>,
     focus_composer: bool,
+    /// The My Day agenda, when My Day is the open list.
+    my_day: Option<MyDayView>,
+    my_day_order: Vec<String>,
+    layout_open: bool,
 }
 
 /// Open drawer state: edit buffers for one task.
@@ -103,9 +108,36 @@ impl DöneApp {
             form_error: None,
             palette: None,
             focus_composer: false,
+            my_day: None,
+            my_day_order: vec![],
+            layout_open: false,
         };
         app.reload();
         app
+    }
+
+    /// The My Day layout editor: move groups and the section break.
+    fn my_day_layout_ui(&mut self, ui: &mut egui::Ui) {
+        ui.weak(self.t("myday.layoutHint"));
+        let mut mv = None;
+        let n = self.my_day_order.len();
+        for (i, k) in self.my_day_order.iter().enumerate() {
+            ui.horizontal(|ui| {
+                if ui.add_enabled(i > 0, egui::Button::new("↑").small()).clicked() {
+                    mv = Some((i, -1));
+                }
+                if ui.add_enabled(i + 1 < n, egui::Button::new("↓").small()).clicked() {
+                    mv = Some((i, 1));
+                }
+                ui.label(self.t(&order_item_key(k)));
+            });
+        }
+        if let Some((i, d)) = mv {
+            match move_my_day_item(&self.service, i, d) {
+                Ok(_) => self.reload(),
+                Err(e) => self.error = Some(crate::drawer::error_message(&e, &self.locale)),
+            }
+        }
     }
 
     fn t(&self, key: &str) -> String {
@@ -128,6 +160,11 @@ impl DöneApp {
                 if self.view.as_ref().is_some_and(|id| !self.views.iter().any(|v| &v.view.id == id)) {
                     self.view = None;
                 }
+                self.my_day_order = load_my_day_order(&self.service);
+                let is_my_day = self.view.is_none() && self.list == SmartList::MyDay;
+                self.my_day = is_my_day.then(|| {
+                    my_day_view(&tasks, self.service.today(), settings, &self.my_day_order, &self.locale)
+                });
                 self.rows = match self.views.iter().find(|v| Some(&v.view.id) == self.view.as_ref()) {
                     Some(v) => view_rows(v, &tasks, self.service.today(), &self.locale),
                     None => list_rows(self.list, &tasks, self.service.today(), settings, &self.locale),
@@ -986,6 +1023,13 @@ impl eframe::App for DöneApp {
                     }
                 }
             });
+            if self.view.is_none() && self.list == SmartList::MyDay {
+                let label = self.t("myday.layout");
+                ui.toggle_value(&mut self.layout_open, label);
+                if self.layout_open {
+                    self.my_day_layout_ui(ui);
+                }
+            }
             ui.add_space(6.0);
             let hint = self.t("composer.placeholder");
             let resp = ui.add(
@@ -1008,37 +1052,33 @@ impl eframe::App for DöneApp {
                 let mut clicked = None;
                 let mut deleted = None;
                 let mut opened = None;
-                for r in &self.rows {
-                    ui.horizontal(|ui| {
-                        let mut done = r.completed;
-                        let p = HashMap::from([("name".to_owned(), Some(r.subject.clone()))]);
-                        let hint = tr("task.complete", &p, Some(&self.locale));
-                        if ui.checkbox(&mut done, "").on_hover_text(hint).clicked() {
-                            clicked = Some((r.id.clone(), r.completed));
-                        }
-                        let mut subject = RichText::new(&r.subject);
-                        if r.completed {
-                            subject = subject.strikethrough().weak();
-                        }
-                        if ui.add(egui::Label::new(subject).sense(egui::Sense::click())).clicked() {
-                            opened = Some(r.id.clone());
-                        }
-                        if r.important {
-                            ui.label(RichText::new("★").color(AMBER));
-                        }
-                        if let Some(d) = &r.due {
-                            let c = if r.overdue { Color32::from_rgb(0xb4, 0x24, 0x24) } else { CORAL };
-                            ui.label(RichText::new(d).small().color(c));
-                        }
-                        for tag in &r.tags {
-                            ui.label(RichText::new(tag).small().weak());
-                        }
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.small_button("🗑").on_hover_text(self.t("trash.deleted")).clicked() {
-                                deleted = Some(r.id.clone());
+                let locale = self.locale.clone();
+                if let Some(v) = &self.my_day {
+                    let tt = |k: &str| tr(k, &HashMap::new(), Some(&locale));
+                    if v.is_empty() {
+                        ui.weak(tt("task.emptyMyDay"));
+                    }
+                    for s in &v.sections {
+                        ui.add_space(4.0);
+                        ui.label(RichText::new(tt(s.title_key)).strong());
+                        for g in &s.groups {
+                            ui.label(RichText::new(tt(&g.title_key)).small().weak());
+                            for r in &g.rows {
+                                task_row_ui(ui, r, &locale, &mut clicked, &mut deleted, &mut opened);
                             }
-                        });
-                    });
+                        }
+                    }
+                    if !v.completed.is_empty() {
+                        ui.add_space(8.0);
+                        ui.separator();
+                        for r in &v.completed {
+                            task_row_ui(ui, r, &locale, &mut clicked, &mut deleted, &mut opened);
+                        }
+                    }
+                } else {
+                    for r in &self.rows {
+                        task_row_ui(ui, r, &locale, &mut clicked, &mut deleted, &mut opened);
+                    }
                 }
                 if let Some((id, was)) = clicked {
                     self.toggle(&id, was);
@@ -1054,4 +1094,45 @@ impl eframe::App for DöneApp {
         self.palette_ui(&ctx);
         self.show_toasts(&ctx);
     }
+}
+
+/// Draw one task row; records the clicked/deleted/opened ids.
+fn task_row_ui(
+    ui: &mut egui::Ui,
+    r: &TaskRow,
+    locale: &str,
+    clicked: &mut Option<(String, bool)>,
+    deleted: &mut Option<String>,
+    opened: &mut Option<String>,
+) {
+                    ui.horizontal(|ui| {
+                        let mut done = r.completed;
+                        let p = HashMap::from([("name".to_owned(), Some(r.subject.clone()))]);
+                        let hint = tr("task.complete", &p, Some(locale));
+                        if ui.checkbox(&mut done, "").on_hover_text(hint).clicked() {
+                            *clicked = Some((r.id.clone(), r.completed));
+                        }
+                        let mut subject = RichText::new(&r.subject);
+                        if r.completed {
+                            subject = subject.strikethrough().weak();
+                        }
+                        if ui.add(egui::Label::new(subject).sense(egui::Sense::click())).clicked() {
+                            *opened = Some(r.id.clone());
+                        }
+                        if r.important {
+                            ui.label(RichText::new("★").color(AMBER));
+                        }
+                        if let Some(d) = &r.due {
+                            let c = if r.overdue { Color32::from_rgb(0xb4, 0x24, 0x24) } else { CORAL };
+                            ui.label(RichText::new(d).small().color(c));
+                        }
+                        for tag in &r.tags {
+                            ui.label(RichText::new(tag).small().weak());
+                        }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.small_button("🗑").on_hover_text(tr("trash.deleted", &HashMap::new(), Some(locale))).clicked() {
+                                *deleted = Some(r.id.clone());
+                            }
+                        });
+                    });
 }
