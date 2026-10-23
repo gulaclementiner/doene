@@ -120,3 +120,32 @@ pub fn set_setting(conn: &Connection, key: &str, value: &str) -> rusqlite::Resul
     )?;
     Ok(())
 }
+
+/// Saved views as `(id, name, emoji, match_mode, show_done, position, tags)` read for quick-add.
+pub fn views(conn: &Connection) -> rusqlite::Result<Vec<doene_core::View>> {
+    use doene_core::{MatchMode, Tag, View};
+    let mut stmt = conn.prepare(
+        "SELECT id, name, emoji, match_mode, show_done, position FROM views ORDER BY position, id",
+    )?;
+    let mut views: Vec<View> = stmt
+        .query_map([], |r| {
+            Ok(View {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                emoji: r.get(2)?,
+                match_mode: if r.get::<_, String>(3)? == "all" { MatchMode::All } else { MatchMode::Any },
+                show_done: r.get::<_, i64>(4)? != 0,
+                position: r.get(5)?,
+                tags: vec![],
+            })
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut tag_stmt = conn.prepare("SELECT tag FROM view_tags WHERE view_id = ?1 ORDER BY tag")?;
+    for v in &mut views {
+        v.tags = tag_stmt
+            .query_map(params![v.id], |r| r.get::<_, String>(0))?
+            .filter_map(|t| t.ok().and_then(|t| Tag::new(&t).ok()))
+            .collect();
+    }
+    Ok(views)
+}
