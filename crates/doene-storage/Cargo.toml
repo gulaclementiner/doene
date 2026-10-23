@@ -6,3 +6,7 @@ description = "Döne persistence: SQLite via rusqlite, migrations, JSON export/i
 
 [dependencies]
 doene-core = { workspace = true }
+rusqlite = { version = "0.40", features = ["bundled"] }
+
+[dev-dependencies]
+tempfile = "3"
