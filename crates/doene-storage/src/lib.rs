@@ -9,6 +9,7 @@ use std::path::Path;
 use rusqlite::Connection;
 
 pub mod migrations;
+pub mod tasks;
 
 pub use migrations::SCHEMA_VERSION;
 
