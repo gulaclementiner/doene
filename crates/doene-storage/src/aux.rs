@@ -164,3 +164,23 @@ pub fn set_pref(conn: &Connection, scope: &str, value: &str) -> rusqlite::Result
     )?;
     Ok(())
 }
+
+/// Keys of already-fired notifications, oldest first.
+pub fn fired_keys(conn: &Connection) -> rusqlite::Result<Vec<String>> {
+    let mut st = conn.prepare("SELECT key FROM fired_notifications ORDER BY rowid")?;
+    st.query_map([], |r| r.get(0))?.collect()
+}
+
+/// Record `key` as fired at `at` (no-op if already recorded).
+pub fn mark_fired(conn: &Connection, key: &str, at: &str) -> rusqlite::Result<()> {
+    conn.execute("INSERT OR IGNORE INTO fired_notifications (key, at) VALUES (?1, ?2)", params![key, at])?;
+    Ok(())
+}
+
+/// Keep only the newest `keep` fired keys.
+pub fn prune_fired(conn: &Connection, keep: usize) -> rusqlite::Result<usize> {
+    conn.execute(
+        "DELETE FROM fired_notifications WHERE rowid NOT IN (SELECT rowid FROM fired_notifications ORDER BY rowid DESC LIMIT ?1)",
+        params![keep as i64],
+    )
+}

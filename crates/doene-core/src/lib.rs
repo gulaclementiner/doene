@@ -12,6 +12,7 @@ pub mod errors;
 pub mod i18n;
 pub mod labels;
 pub mod nlp;
+pub mod notifications;
 pub mod quickadd;
 pub mod recurrence;
 pub mod search;

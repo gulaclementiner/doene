@@ -24,6 +24,18 @@ const CORAL: Color32 = Color32::from_rgb(0xe4, 0x57, 0x2e);
 const AMBER: Color32 = Color32::from_rgb(0xc9, 0x8a, 0x1b);
 
 /// The single app state.
+/// Delivers a native notification `(title, body)`.
+pub type Deliver = Box<dyn Fn(&str, &str)>;
+/// Current local time as `YYYY-MM-DDTHH:MM`.
+pub type LocalClock = Box<dyn Fn() -> String>;
+
+/// OS-notification wiring supplied by the composition root.
+struct NotifyHook {
+    deliver: Deliver,
+    clock: LocalClock,
+    last_minute: String,
+}
+
 pub struct DöneApp {
     service: Service,
     list: SmartList,
@@ -51,6 +63,7 @@ pub struct DöneApp {
     my_day: Option<MyDayView>,
     my_day_order: Vec<String>,
     layout_open: bool,
+    notifier: Option<NotifyHook>,
     /// The task Alt+arrows act on (last opened/clicked task).
     selected: Option<String>,
     /// Task being dragged with the mouse (#20).
@@ -117,9 +130,31 @@ impl DöneApp {
             selected: None,
             dragging: None,
             layout_open: false,
+            notifier: None,
         };
         app.reload();
         app
+    }
+
+    /// Enable OS notifications: `deliver` shows a toast, `clock` gives local `YYYY-MM-DDTHH:MM`.
+    /// The app checks once per minute while it runs (also minimised).
+    pub fn set_notifier(&mut self, deliver: Deliver, clock: LocalClock) {
+        self.notifier = Some(NotifyHook { deliver, clock, last_minute: String::new() });
+    }
+
+    /// Fire due reminders / due-today notifications (at most once per minute tick).
+    fn notify_tick(&mut self) {
+        let Some(h) = self.notifier.as_mut() else { return };
+        let now = (h.clock)();
+        if now == h.last_minute {
+            return;
+        }
+        h.last_minute = now.clone();
+        if let Ok(due) = self.service.take_due_notifications(&now) {
+            for n in due {
+                (h.deliver)(&n.title, &n.body);
+            }
+        }
     }
 
     /// The My Day layout editor: move groups and the section break.
@@ -974,6 +1009,8 @@ impl eframe::App for DöneApp {
         let ctx = ui.ctx().clone();
         self.apply_theme(&ctx);
         self.now = ctx.input(|i| i.time);
+        self.notify_tick();
+        ctx.request_repaint_after(std::time::Duration::from_secs(15));
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Z)) && !ctx.egui_wants_keyboard_input() {
             self.undo();
         }
