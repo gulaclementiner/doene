@@ -1,0 +1,29 @@
+[package]
+name = "doene"
+version = "0.1.0"
+edition = "2024"
+description = "Döne — native To Do app (composition root binary)"
+
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.dependencies]
+eframe = "0.37"
+dirs = "7"
+doene-core = { path = "crates/doene-core" }
+doene-storage = { path = "crates/doene-storage" }
+doene-service = { path = "crates/doene-service" }
+doene-ui = { path = "crates/doene-ui" }
+doene-notify = { path = "crates/doene-notify" }
+
+[dependencies]
+dirs = { workspace = true }
+sys-locale = "0.3"
+eframe = { workspace = true }
+# Composition root: the binary wires every crate together (docs/plan.md §4).
+doene-core = { workspace = true }
+doene-storage = { workspace = true }
+doene-service = { workspace = true }
+doene-ui = { workspace = true }
+doene-notify = { workspace = true }

@@ -1,0 +1,12 @@
+[package]
+name = "doene-storage"
+version = "0.1.0"
+edition = "2024"
+description = "Döne persistence: SQLite via rusqlite, migrations, JSON export/import (M2)"
+
+[dependencies]
+doene-core = { workspace = true }
+rusqlite = { version = "0.40", features = ["bundled"] }
+
+[dev-dependencies]
+tempfile = "3"

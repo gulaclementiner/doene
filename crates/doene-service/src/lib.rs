@@ -1,0 +1,17 @@
+//! Döne service layer: application operations orchestrating core rules and storage.
+//!
+//! The designated integration seam (ADR-0001, ADR-0002): explicit methods, plain
+//! data in and out, no UI types across the boundary, transport-agnostic.
+//! Mirrors Gör't's task-endpoint semantics (`store.js`, `server.js`). Every
+//! mutation runs in one transaction and writes an `activity` row.
+//! Errors are structured `{code, params}` ([`CodedError`]); the English message
+//! is the fallback translation.
+
+mod service;
+mod snapshot;
+
+pub use doene_core::{CodedError, SavedView};
+pub use service::{
+    ActivityEntry, Clock, EXPORT_FORMAT, EXPORT_VERSION, ImportSummary, NewTask, Restored, Service,
+    ServiceError, Settings, StepPatch, TRASH_DAYS, TaskPatch, TrashItem, UndoKind, UpdateOutcome,
+};

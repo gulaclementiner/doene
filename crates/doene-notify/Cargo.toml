@@ -1,0 +1,8 @@
+[package]
+name = "doene-notify"
+version = "0.1.0"
+edition = "2024"
+description = "Döne notifications: OS toast delivery (standalone crate)"
+
+[dependencies]
+# Intentionally empty: standalone, no dependency on other Döne crates.
