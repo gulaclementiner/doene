@@ -3,6 +3,7 @@
 //! No I/O, no UI dependencies (docs/plan.md §3). The public API is
 //! deliberately small: entities, read-model builders, and pure rule functions.
 
+pub mod agenda;
 pub mod agenda_order;
 pub mod dates;
 pub mod dnd;
@@ -13,6 +14,9 @@ pub mod labels;
 pub mod recurrence;
 pub mod tree;
 
+pub use agenda::{
+    DEFAULT_SORT, FocusMode, GroupKey, SortDirection, SortOrder, SortSpec, is_picked,
+};
 pub use agenda_order::{
     AgendaLayoutSave, DEFAULT_ORDER, GROUP_KEYS, ORDER_KEYS, SECTION_BREAK, agenda_layout_save,
     agenda_order_for, clean_agenda_order, default_order,
