@@ -341,3 +341,6 @@ palette.newView=New view
 palette.lightMode=Switch to light mode
 palette.darkMode=Switch to dark mode
 trash.emptyConfirm=Empty the trash? This cannot be undone.
+undo.done=Undone
+undo.nothing=Nothing to undo
+trash.itemDeleted=Deleted {when}

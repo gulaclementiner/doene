@@ -341,3 +341,6 @@ palette.newView=Ny vy
 palette.lightMode=Byt till ljus läge
 palette.darkMode=Byt till mörkt läge
 trash.emptyConfirm=Töm papperskorgen? Detta kan inte ångras.
+undo.done=Ångrat
+undo.nothing=Inget att ångra
+trash.itemDeleted=Raderad {when}

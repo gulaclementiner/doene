@@ -3,7 +3,9 @@
 use doene_core::labels::due_label;
 use doene_core::{DEFAULT_SORT, Date, HydratedTask, Importance, SmartList, SmartSettings, TaskStatus};
 use doene_core::{smart_tasks, smartlists::sort_tasks};
-use doene_service::{Service, ServiceError, TaskPatch};
+use doene_service::{Service, ServiceError, TaskPatch, TrashItem, UndoKind};
+use doene_core::i18n::tr;
+use std::collections::HashMap;
 
 /// The user's theme choice (persisted as the `theme` setting).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,8 +120,118 @@ pub fn toggle_complete(
     Ok(Toggled::Completed { next_due })
 }
 
+/// One trash list row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrashRow {
+    pub id: String,
+    pub label: String,
+    /// Localised "Task" / "View".
+    pub kind: String,
+    /// Date the entry was deleted (`YYYY-MM-DD`).
+    pub deleted: String,
+}
+
+/// Trash rows for display (service order: newest first).
+pub fn trash_rows(items: &[TrashItem], locale: &str) -> Vec<TrashRow> {
+    items
+        .iter()
+        .map(|i| TrashRow {
+            id: i.id.clone(),
+            label: i.label.clone().unwrap_or_default(),
+            kind: tr(
+                if i.kind == doene_core::TrashKind::View { "trash.kindView" } else { "trash.kindTask" },
+                &HashMap::new(),
+                Some(locale),
+            ),
+            deleted: i.deleted_at.chars().take(10).collect(),
+        })
+        .collect()
+}
+
+/// Toast text after a successful undo (`None` = nothing was undone).
+pub fn undo_message(undone: Option<UndoKind>, locale: &str) -> String {
+    let key = match undone {
+        None => "undo.nothing",
+        Some(UndoKind::Delete) => "undo.taskRestored",
+        Some(_) => "undo.done",
+    };
+    tr(key, &HashMap::new(), Some(locale))
+}
+
+/// How long a toast stays, in seconds.
+pub const TOAST_SECS: f64 = 5.0;
+
+/// A transient message, optionally offering Undo.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Toast {
+    pub text: String,
+    pub undo: bool,
+    /// Time (seconds, any monotonic clock) after which it disappears.
+    pub expires: f64,
+}
+
+/// Plain toast queue; the UI feeds it the current time.
+#[derive(Debug, Default)]
+pub struct Toasts {
+    items: Vec<Toast>,
+}
+
+impl Toasts {
+    pub fn push(&mut self, text: impl Into<String>, undo: bool, now: f64) {
+        self.items.push(Toast { text: text.into(), undo, expires: now + TOAST_SECS });
+    }
+
+    /// Drop expired toasts and return the live ones (oldest first).
+    pub fn live(&mut self, now: f64) -> &[Toast] {
+        self.items.retain(|t| t.expires > now);
+        &self.items
+    }
+
+    /// Remove the toast at `index` (dismiss / undo clicked).
+    pub fn dismiss(&mut self, index: usize) {
+        if index < self.items.len() {
+            self.items.remove(index);
+        }
+    }
+}
+
+/// Delete a task (to Trash) through the service; returns the toast text.
+pub fn delete_with_toast(service: &Service, id: &str, locale: &str) -> Result<String, ServiceError> {
+    service.delete_task(id)?;
+    Ok(tr("trash.deleted", &HashMap::new(), Some(locale)))
+}
+
 #[cfg(test)]
 mod tests {
+    fn mem() -> Service {
+        Service::new(doene_storage::Storage::open_in_memory().unwrap())
+    }
+
+    #[test]
+    fn delete_toast_trash_rows_and_undo() {
+        let s = mem();
+        let t = s.create_task(doene_service::NewTask { subject: "x".into(), ..Default::default() }).unwrap();
+        assert_eq!(delete_with_toast(&s, &t.task.id, "en").unwrap(), "Task moved to Trash");
+        let rows = trash_rows(&s.trash().unwrap(), "sv");
+        assert_eq!(rows.len(), 1);
+        assert_eq!((rows[0].label.as_str(), rows[0].kind.as_str()), ("x", "Uppgift"));
+        let r = s.undo().unwrap();
+        assert_eq!(undo_message(r, "en"), "Task restored");
+        assert_eq!(undo_message(s.undo().unwrap(), "en"), "Nothing to undo");
+        assert_eq!(undo_message(Some(UndoKind::Edit), "sv"), "Ångrat");
+    }
+
+    #[test]
+    fn toasts_expire_and_dismiss() {
+        let mut q = Toasts::default();
+        q.push("a", true, 0.0);
+        q.push("b", false, 3.0);
+        assert_eq!(q.live(4.0).len(), 2);
+        assert_eq!(q.live(6.0).len(), 1);
+        q.dismiss(0);
+        assert!(q.live(6.0).is_empty());
+    }
+
     use super::*;
     use doene_core::Task;
 
