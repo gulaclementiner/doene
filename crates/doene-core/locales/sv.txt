@@ -310,6 +310,7 @@ drawer.addTagShort=Lägg till tagg
 drawer.addTagExample=Lägg till en tagg, t.ex. mejl
 drawer.removeTag=Ta bort taggen {tag}
 drawer.subtasksHint=Deluppgifter är kompletta uppgifter. Dra en uppgift hit för att lägga till den.
+reorder.cannotNest=Det finns ingen uppgift ovanför att nästla under
 drawer.completeSubtask=Slutför deluppgift {name}
 drawer.reopenSubtask=Återöppna deluppgift {name}
 drawer.addSubtask=Lägg till en deluppgift

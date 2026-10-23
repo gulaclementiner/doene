@@ -310,6 +310,7 @@ drawer.addTagShort=Add tag
 drawer.addTagExample=Add a tag, e.g. emails
 drawer.removeTag=Remove tag {tag}
 drawer.subtasksHint=Subtasks are full tasks. Drag any task onto this one to add it here.
+reorder.cannotNest=There is no task above to nest under
 drawer.completeSubtask=Complete subtask {name}
 drawer.reopenSubtask=Reopen subtask {name}
 drawer.addSubtask=Add a subtask

@@ -51,6 +51,8 @@ pub struct DöneApp {
     my_day: Option<MyDayView>,
     my_day_order: Vec<String>,
     layout_open: bool,
+    /// The task Alt+arrows act on (last opened/clicked task).
+    selected: Option<String>,
 }
 
 /// Open drawer state: edit buffers for one task.
@@ -110,6 +112,7 @@ impl DöneApp {
             focus_composer: false,
             my_day: None,
             my_day_order: vec![],
+            selected: None,
             layout_open: false,
         };
         app.reload();
@@ -179,6 +182,7 @@ impl DöneApp {
 
     /// (Re)load the drawer buffers for a task; closes the drawer if it is gone.
     fn open_drawer(&mut self, id: &str) {
+        self.selected = Some(id.to_owned());
         let Ok(h) = self.service.task(id) else {
             self.drawer = None;
             return;
@@ -222,6 +226,19 @@ impl DöneApp {
             Err(m) => self.error = Some(m),
         }
         self.reload();
+    }
+
+    /// Alt+arrow reordering of the selected task; rejections show as feedback.
+    fn key_reorder(&mut self, key: crate::reorder::MoveKey) {
+        let Some(id) = self.selected.clone() else { return };
+        match crate::reorder::key_move(&self.service, &id, key, &self.locale) {
+            Ok(_) => self.error = None,
+            Err(m) => self.error = Some(m),
+        }
+        self.reload();
+        if self.drawer.as_ref().is_some_and(|d| d.id == id) {
+            self.open_drawer(&id);
+        }
     }
 
     fn move_drawer_section(&mut self, index: usize, delta: i32) {
@@ -944,6 +961,20 @@ impl eframe::App for DöneApp {
         self.now = ctx.input(|i| i.time);
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Z)) && !ctx.egui_wants_keyboard_input() {
             self.undo();
+        }
+
+        if self.palette.is_none() && !ctx.egui_wants_keyboard_input() {
+            use crate::reorder::MoveKey;
+            for (k, m) in [
+                (egui::Key::ArrowUp, MoveKey::Up),
+                (egui::Key::ArrowDown, MoveKey::Down),
+                (egui::Key::ArrowRight, MoveKey::Nest),
+                (egui::Key::ArrowLeft, MoveKey::Unnest),
+            ] {
+                if ctx.input_mut(|i| i.consume_key(egui::Modifiers::ALT, k)) {
+                    self.key_reorder(m);
+                }
+            }
         }
 
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::K)) {
