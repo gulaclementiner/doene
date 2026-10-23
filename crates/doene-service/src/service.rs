@@ -159,6 +159,30 @@ struct Ctx {
 pub struct Service {
     storage: Storage,
     clock: Clock,
+    undo: std::sync::Mutex<Vec<UndoEntry>>,
+}
+
+/// Most recent mutations kept for undo.
+const UNDO_DEPTH: usize = 50;
+
+/// What kind of mutation an undo entry reverses (drives the toast wording).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UndoKind {
+    Create,
+    Edit,
+    Delete,
+    Move,
+    Restore,
+    Trash,
+}
+
+/// Plain-data state before a mutation: every task (with tags and steps) and the trash.
+/// Undo is generic: any `undoable` mutation is reversed by restoring this state,
+/// so new operations only need to run through [`Service::tx_undoable`].
+struct UndoEntry {
+    kind: UndoKind,
+    tasks: Vec<HydratedTask>,
+    trash: Vec<TrashRow>,
 }
 
 fn system_now() -> String {
@@ -485,7 +509,7 @@ impl Service {
 
     /// A service with an injected clock (tests).
     pub fn with_clock(storage: Storage, clock: Clock) -> Self {
-        Self { storage, clock }
+        Self { storage, clock, undo: Default::default() }
     }
 
     fn ctx(&self) -> Ctx {
@@ -501,6 +525,76 @@ impl Service {
         let out = f(&tx, &ctx)?;
         tx.commit()?;
         Ok(out)
+    }
+
+    /// Like [`Self::tx`], but records the prior state so [`Self::undo`] can reverse it.
+    /// A failed mutation records nothing.
+    fn tx_undoable<T>(&self, kind: UndoKind, f: impl FnOnce(&Connection, &Ctx) -> Res<T>) -> Res<T> {
+        let ctx = self.ctx();
+        let tx = self.storage.conn().unchecked_transaction()?;
+        let entry = UndoEntry { kind, tasks: tasks::all_tasks(&tx)?, trash: aux::trash(&tx)? };
+        let out = f(&tx, &ctx)?;
+        tx.commit()?;
+        let mut stack = self.undo.lock().unwrap_or_else(|e| e.into_inner());
+        stack.push(entry);
+        if stack.len() > UNDO_DEPTH {
+            stack.remove(0);
+        }
+        Ok(out)
+    }
+
+    /// Whether there is anything to undo, and of what kind (the newest entry).
+    pub fn undo_peek(&self) -> Option<UndoKind> {
+        self.undo.lock().unwrap_or_else(|e| e.into_inner()).last().map(|e| e.kind)
+    }
+
+    /// Reverse the most recent undoable mutation. `None` when there is nothing to undo.
+    pub fn undo(&self) -> Res<Option<UndoKind>> {
+        let Some(entry) = self.undo.lock().unwrap_or_else(|e| e.into_inner()).pop() else {
+            return Ok(None);
+        };
+        let r = self.tx(|c, ctx| {
+            c.pragma_update(None, "defer_foreign_keys", true)?;
+            let now = tasks::all_tasks(c)?;
+            let keep: std::collections::HashSet<&str> = entry.tasks.iter().map(|h| h.task.id.as_str()).collect();
+            let gone: Vec<String> = now.iter().filter(|h| !keep.contains(h.task.id.as_str())).map(|h| h.task.id.clone()).collect();
+            tasks::delete_tasks(c, &gone)?;
+            let cur: std::collections::HashMap<&str, &HydratedTask> = now.iter().map(|h| (h.task.id.as_str(), h)).collect();
+            for h in &entry.tasks {
+                match cur.get(h.task.id.as_str()) {
+                    Some(c0) if **c0 == *h => {}
+                    Some(c0) => {
+                        tasks::update_task(c, &h.task)?;
+                        if c0.tags != h.tags {
+                            tasks::set_tags(c, &h.task.id, &h.tags)?;
+                        }
+                        if c0.steps != h.steps {
+                            for s in &c0.steps {
+                                tasks::delete_step(c, &s.id)?;
+                            }
+                            for s in &h.steps {
+                                tasks::insert_step(c, s)?;
+                            }
+                        }
+                    }
+                    None => {
+                        tasks::insert_task(c, &h.task)?;
+                        tasks::set_tags(c, &h.task.id, &h.tags)?;
+                        for s in &h.steps {
+                            tasks::insert_step(c, s)?;
+                        }
+                    }
+                }
+            }
+            if aux::trash(c)? != entry.trash {
+                aux::empty_trash(c)?;
+                for t in &entry.trash {
+                    aux::insert_trash(c, t)?;
+                }
+            }
+            log(c, ctx, None, "undone", None)
+        });
+        r.map(|()| Some(entry.kind))
     }
 
     /// Today (UTC) per the service clock.
@@ -535,12 +629,12 @@ impl Service {
 
     /// Create a task.
     pub fn create_task(&self, n: NewTask) -> Res<HydratedTask> {
-        self.tx(|c, ctx| create_in(c, ctx, n))
+        self.tx_undoable(UndoKind::Create, |c, ctx| create_in(c, ctx, n))
     }
 
     /// Quick-add: parse `text` (NLP, view defaults) and create the task.
     pub fn quick_add(&self, text: &str, view: Option<&QuickAddView>, literal: bool) -> Res<HydratedTask> {
-        self.tx(|c, ctx| {
+        self.tx_undoable(UndoKind::Create, |c, ctx| {
             let opts = QuickAddOptions {
                 today: ctx.today,
                 views: aux::views(c)?,
@@ -568,12 +662,12 @@ impl Service {
 
     /// Patch a task. Completing a repeating task spawns its next occurrence.
     pub fn update_task(&self, id: &str, patch: TaskPatch) -> Res<UpdateOutcome> {
-        self.tx(|c, ctx| update_in(c, ctx, id, patch))
+        self.tx_undoable(UndoKind::Edit, |c, ctx| update_in(c, ctx, id, patch))
     }
 
     /// Move a task and its subtree to the trash; returns the trash entry id.
     pub fn delete_task(&self, id: &str) -> Res<String> {
-        self.tx(|c, ctx| {
+        self.tx_undoable(UndoKind::Delete, |c, ctx| {
             let t = need(c, id)?;
             let subtree: Vec<HydratedTask> = tasks::descendants(c, id)?
                 .iter()
@@ -601,7 +695,7 @@ impl Service {
 
     /// Place a task at `index` among the siblings under `parent_id` (manual order).
     pub fn place_task(&self, id: &str, parent_id: Option<&str>, index: usize) -> Res<HydratedTask> {
-        self.tx(|c, ctx| {
+        self.tx_undoable(UndoKind::Move, |c, ctx| {
             let mut cur = need(c, id)?.task;
             check_parent(c, Some(id), parent_id)?;
             let sib: Vec<(String, f64)> = tasks::siblings(c, parent_id)?
@@ -651,7 +745,7 @@ impl Service {
 
     /// Add a step to a task.
     pub fn create_step(&self, task_id: &str, subject: &str) -> Res<Step> {
-        self.tx(|c, ctx| {
+        self.tx_undoable(UndoKind::Edit, |c, ctx| {
             if subject.trim().is_empty() {
                 return Err(coded("error.subjectRequired", "subject required"));
             }
@@ -672,7 +766,7 @@ impl Service {
 
     /// Patch a step.
     pub fn update_step(&self, id: &str, p: StepPatch) -> Res<Step> {
-        self.tx(|c, ctx| {
+        self.tx_undoable(UndoKind::Edit, |c, ctx| {
             let mut s = tasks::step(c, id)?.ok_or_else(|| not_found("what.step", "step"))?;
             if let Some(v) = p.subject {
                 s.subject = v;
@@ -691,7 +785,7 @@ impl Service {
 
     /// Delete a step.
     pub fn delete_step(&self, id: &str) -> Res<()> {
-        self.tx(|c, ctx| {
+        self.tx_undoable(UndoKind::Edit, |c, ctx| {
             let s = tasks::step(c, id)?.ok_or_else(|| not_found("what.step", "step"))?;
             tasks::delete_step(c, id)?;
             log(c, ctx, Some(&s.task_id), "step deleted", Some(&s.subject))
@@ -700,7 +794,7 @@ impl Service {
 
     /// Promote a step to a subtask of its task.
     pub fn step_to_task(&self, id: &str) -> Res<HydratedTask> {
-        self.tx(|c, ctx| {
+        self.tx_undoable(UndoKind::Edit, |c, ctx| {
             let s = tasks::step(c, id)?.ok_or_else(|| not_found("what.step", "step"))?;
             let t = create_in(c, ctx, NewTask {
                 subject: s.subject.clone(),
@@ -733,7 +827,7 @@ impl Service {
 
     /// Permanently remove one trash entry.
     pub fn delete_forever(&self, id: &str) -> Res<()> {
-        self.tx(|c, ctx| {
+        self.tx_undoable(UndoKind::Trash, |c, ctx| {
             aux::delete_trash(c, id)?;
             log(c, ctx, None, "trash entry purged", Some(id))
         })
@@ -741,7 +835,7 @@ impl Service {
 
     /// Permanently remove every trash entry.
     pub fn empty_trash(&self) -> Res<()> {
-        self.tx(|c, ctx| {
+        self.tx_undoable(UndoKind::Trash, |c, ctx| {
             let n = aux::empty_trash(c)?;
             log(c, ctx, None, "trash emptied", Some(&n.to_string()))
         })
@@ -749,7 +843,7 @@ impl Service {
 
     /// Restore a trashed task (with its subtree, steps and tags).
     pub fn restore(&self, id: &str) -> Res<Restored> {
-        self.tx(|c, ctx| {
+        self.tx_undoable(UndoKind::Restore, |c, ctx| {
             let row = aux::trash_entry(c, id)?.ok_or_else(|| not_found("what.trashEntry", "trash entry"))?;
             let data: Value = serde_json::from_str(&row.data).unwrap_or(Value::Null);
             if row.kind == "view" {
