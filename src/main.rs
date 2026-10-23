@@ -28,7 +28,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     eframe::run_native(
         "Döne",
         eframe::NativeOptions::default(),
-        Box::new(move |_cc| Ok(Box::new(doene_ui::DöneApp::new(service)))),
+        Box::new(move |_cc| {
+            let mut app = doene_ui::DöneApp::new(service);
+            let notifier = doene_notify::system_notifier();
+            app.set_notifier(
+                Box::new(move |title, body| {
+                    if let Err(e) = notifier.notify(title, body) {
+                        eprintln!("notification failed: {e}");
+                    }
+                }),
+                Box::new(doene_notify::local_minute_now),
+            );
+            Ok(Box::new(app))
+        }),
     )?;
     Ok(())
 }
