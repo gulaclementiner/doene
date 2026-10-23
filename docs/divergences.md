@@ -99,17 +99,6 @@ an entry here (docs/plan.md §3).
 - **Pinning tests:** `i18n::tests::detect_language_picks_the_best_supported_language_by_q_value`,
   `i18n::tests::detect_language_handles_missing_or_empty_input`.
 
-## D7 — Agenda/smart-list API shape (note, not a behaviour change)
-
-- **What diverged:** Gör't's `smartTasks(id, ...)` takes a string id and
-  `settings` bag; Döne uses a `SmartList` enum, a typed `SmartSettings`, and
-  returns borrowed tasks. Unknown ids surface via `SmartList::parse`
-  (`error.unknownSmartList`, param `id`), and an unknown agenda group key is an
-  `UnknownGroup` error. `sort_tasks` has no `low` importance rank because
-  `Importance` has only `Normal`/`High`.
-- **Why:** type safety; membership, ordering and expiry behaviour are unchanged.
-- **Pinning tests:** `smartlists::tests::*`, `agenda::tests::*`.
-
 ## D6 — Impossible ISO dates in quick-add text stay in the subject
 
 - **What diverged:** Gör't's NLP accepts an explicit `YYYY-MM-DD` token as a due
@@ -124,6 +113,17 @@ an entry here (docs/plan.md §3).
   Accepting `'2025-02-31'` would store a value that drifts on every read.
 - **Pinning test:**
   `crates/doene-core/tests/nlp_search.rs::an_impossible_iso_date_stays_in_the_subject`.
+
+## D7 — Agenda/smart-list API shape (note, not a behaviour change)
+
+- **What diverged:** Gör't's `smartTasks(id, ...)` takes a string id and
+  `settings` bag; Döne uses a `SmartList` enum, a typed `SmartSettings`, and
+  returns borrowed tasks. Unknown ids surface via `SmartList::parse`
+  (`error.unknownSmartList`, param `id`), and an unknown agenda group key is an
+  `UnknownGroup` error. `sort_tasks` has no `low` importance rank because
+  `Importance` has only `Normal`/`High` (see D11).
+- **Why:** type safety; membership, ordering and expiry behaviour are unchanged.
+- **Pinning tests:** `smartlists::tests::*`, `agenda::tests::*`.
 
 ## D8 — Swedish ordinal-unit recurrences ("var 40:e dag")
 
@@ -153,3 +153,65 @@ an entry here (docs/plan.md §3).
   interval not fitting `u32`) in the subject, without error.
 - **Why:** a parser of free text must never panic or throw on user input.
 - **Pinning test:** `tests/nlp_sv.rs::d10_absurd_counts_stay_in_the_subject`.
+
+## D11 — `!low` quick-add is stored as normal importance
+
+- **What diverged:** Gör't's NLP emits `importance: 'low'` for `!low`/`!låg`
+  and its sort ranks `low` after `normal` (`src/smartlists.js`), but its
+  schema and every UI path only ever use `normal`/`high`. Döne's schema
+  (docs/plan.md §5) is `CHECK (importance IN ('normal','high'))`. The parser
+  still recognises `!low` (and shows the chip), but the service stores it as
+  `normal`; `sort_tasks` has no low rank.
+- **Why:** there is no stored low importance to rank or display; the marker is
+  consumed from the subject so the user's text is not polluted.
+- **Pinning tests:** `doene-service/tests/service.rs::quick_add_low_importance_is_stored_as_normal`;
+  parser side `nlp_search.rs` (`x !low` -> `ImportanceLevel::Low`).
+
+## D12 — Export includes trash and activity; import clears undo and is not undoable
+
+- **What diverged:** (a) the export document carries `trash` and `activity`
+  beyond the minimal list in the spec, per ticket #23, so a round trip is
+  lossless. (b) Import wipes existing data and clears the undo stack; an import
+  itself cannot be undone.
+- **Why:** (a) restoring a backup should also restore trash and history. (b) an
+  undo entry would refer to rows that no longer exist after the wipe.
+- **Pinning tests:** `doene-service/tests/export_import.rs::round_trip_into_fresh_db_is_identical`
+  (trash + activity present), `import_wipes_existing_data` ("undo history is cleared").
+
+## D13 — Drag and drop scope (known gaps)
+
+- **What diverged:** drag-and-drop reordering/nesting works only in the main
+  task list, not in My Day. The My Day layout editor reorders groups and the
+  section break with arrow buttons, not drag.
+- **Why:** the keyboard/arrow path is the guaranteed equivalent (plan §8); My Day
+  drag is deferred. Known gaps, not intended final behaviour.
+- **Pinning test:** arrow-button move logic is covered by
+  `doene-ui::myday::tests::order_persists_and_break_is_movable` and
+  `moving_the_break_changes_sections`; the drag glue is not testable headless.
+
+## D14 — Notifications only fire while the process runs (OPEN GAP, #24)
+
+- **What diverged:** plan §2 promised delivery with the window closed. Today the
+  60 s tick runs inside the UI process, and there is no tray / hide-on-close,
+  so closing the app stops notifications.
+- **Why:** tray/background mode is not built yet. **OPEN GAP for #24.**
+- **Pinning test:** none; not testable headless.
+
+## D15 — Windows notify backend unverified
+
+- **What diverged:** the Windows backend in `doene-notify` is not compiled or
+  exercised on the Linux dev/CI host; only the stub is.
+- **Why:** no Windows toolchain available here; verify on Windows before release.
+- **Pinning test:** none; not testable headless.
+
+## D16 — Data file naming: `done.db` / `DONE_DATA_DIR`
+
+- **What diverged:** the plan names the data directory `%APPDATA%/Döne`
+  (env-overridable) but does not name the file or the variable. The binary uses
+  directory `Döne`, file `done.db` and variable `DONE_DATA_DIR` (ASCII-safe
+  spelling of Döne), not `doene.db`/`DOENE_DATA_DIR`.
+- **Why:** the plan specifies no file/variable name, so nothing to rename to; an
+  ASCII spelling avoids shell/env portability issues. Kept as-is for
+  compatibility with existing data files.
+- **Pinning test:** `doene-ui/tests/persistence.rs` (uses `done.db`); the env
+  override is wired in `src/main.rs`.

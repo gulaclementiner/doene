@@ -93,6 +93,8 @@ fn round_trip_into_fresh_db_is_identical() {
     assert_eq!(doc["version"], 1);
     assert_eq!(doc["tasks"].as_array().unwrap().len(), 3);
     assert_eq!(doc["trash"].as_array().unwrap().len(), 2);
+    // Divergence D12: trash and activity are exported too.
+    assert!(!doc["activity"].as_array().unwrap().is_empty());
     assert!(doc.get("fired_notifications").is_none());
 
     let b = svc();

@@ -470,6 +470,15 @@ fn steps_crud_and_promotion() {
     );
 }
 
+/// Divergence D11: `!low` parses but is stored as normal.
+#[test]
+fn quick_add_low_importance_is_stored_as_normal() {
+    let f = fixture();
+    let t = f.svc.quick_add("Water plants !low", None, false).unwrap();
+    assert_eq!(t.task.subject, "Water plants");
+    assert_eq!(t.task.importance, Importance::Normal);
+}
+
 #[test]
 fn quick_add_parses_nlp_and_applies_view_defaults() {
     let f = fixture();
