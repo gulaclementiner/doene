@@ -1,0 +1,10 @@
+[package]
+name = "doene-ui"
+version = "0.1.0"
+edition = "2024"
+description = "Döne user interface: eframe/egui app"
+
+[dependencies]
+eframe = { workspace = true }
+doene-core = { workspace = true }
+doene-service = { workspace = true }
