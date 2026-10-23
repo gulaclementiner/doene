@@ -1,0 +1,8 @@
+[package]
+name = "doene-core"
+version = "0.1.0"
+edition = "2024"
+description = "Döne pure domain logic and entities — no I/O, no UI dependencies"
+
+[dependencies]
+# Intentionally empty: the core is pure (docs/plan.md §3).

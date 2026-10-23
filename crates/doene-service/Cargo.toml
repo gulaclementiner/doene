@@ -1,0 +1,9 @@
+[package]
+name = "doene-service"
+version = "0.1.0"
+edition = "2024"
+description = "Döne application layer: the integration seam (ADR-0001/0002)"
+
+[dependencies]
+doene-core = { workspace = true }
+doene-storage = { workspace = true }
