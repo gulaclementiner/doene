@@ -53,6 +53,8 @@ pub struct DöneApp {
     layout_open: bool,
     /// The task Alt+arrows act on (last opened/clicked task).
     selected: Option<String>,
+    /// Task being dragged with the mouse (#20).
+    dragging: Option<String>,
 }
 
 /// Open drawer state: edit buffers for one task.
@@ -113,6 +115,7 @@ impl DöneApp {
             my_day: None,
             my_day_order: vec![],
             selected: None,
+            dragging: None,
             layout_open: false,
         };
         app.reload();
@@ -238,6 +241,18 @@ impl DöneApp {
         self.reload();
         if self.drawer.as_ref().is_some_and(|d| d.id == id) {
             self.open_drawer(&id);
+        }
+    }
+
+    /// Apply a mouse drop via the same path as the keyboard (#20).
+    fn drop_task(&mut self, id: &str, outcome: &doene_core::dnd::DropOutcome) {
+        match crate::reorder::apply_outcome(&self.service, id, outcome, &self.locale) {
+            Ok(()) => self.error = None,
+            Err(m) => self.error = Some(m),
+        }
+        self.reload();
+        if self.drawer.as_ref().is_some_and(|d| d.id == id) {
+            self.open_drawer(id);
         }
     }
 
@@ -1095,7 +1110,7 @@ impl eframe::App for DöneApp {
                         for g in &s.groups {
                             ui.label(RichText::new(tt(&g.title_key)).small().weak());
                             for r in &g.rows {
-                                task_row_ui(ui, r, &locale, &mut clicked, &mut deleted, &mut opened);
+                                task_row_ui(ui, r, &locale, &mut clicked, &mut deleted, &mut opened, None);
                             }
                         }
                     }
@@ -1103,12 +1118,58 @@ impl eframe::App for DöneApp {
                         ui.add_space(8.0);
                         ui.separator();
                         for r in &v.completed {
-                            task_row_ui(ui, r, &locale, &mut clicked, &mut deleted, &mut opened);
+                            task_row_ui(ui, r, &locale, &mut clicked, &mut deleted, &mut opened, None);
                         }
                     }
                 } else {
+                    let mut rects = Vec::new();
+                    let mut drag_started = None;
                     for r in &self.rows {
-                        task_row_ui(ui, r, &locale, &mut clicked, &mut deleted, &mut opened);
+                        let rect = task_row_ui(ui, r, &locale, &mut clicked, &mut deleted, &mut opened, Some(&mut drag_started));
+                        rects.push(crate::dragdrop::RowRect { id: r.id.clone(), top: rect.top() as f64, bottom: rect.bottom() as f64 });
+                    }
+                    if drag_started.is_some() {
+                        self.dragging = drag_started;
+                    }
+                    if let Some(id) = self.dragging.clone() {
+                        let ptr = ui.ctx().pointer_interact_pos();
+                        let tree = crate::reorder::Tree::load(&self.service);
+                        let unnest_zone = ui.max_rect().bottom() - 40.0;
+                        let is_nested = tree.parents.get(&id).is_some_and(|p| p.is_some());
+                        let in_unnest = is_nested && ptr.is_some_and(|p| p.y as f32 >= unnest_zone);
+                        let plan = ptr.and_then(|p| crate::dragdrop::plan_drop(&tree, &rects, &id, p.y as f64, in_unnest));
+                        let accent = Color32::from_rgb(0x2f, 0x7d, 0xd1);
+                        let painter = ui.painter();
+                        if is_nested {
+                            let area = egui::Rect::from_min_max(egui::pos2(ui.max_rect().left(), unnest_zone), ui.max_rect().right_bottom());
+                            let c = if in_unnest { accent } else { Color32::GRAY };
+                            painter.rect_stroke(area, 4.0, egui::Stroke::new(1.5, c), egui::StrokeKind::Inside);
+                            painter.text(area.center(), egui::Align2::CENTER_CENTER, tr("misc.unnest", &HashMap::new(), Some(&locale)), egui::FontId::proportional(13.0), c);
+                        }
+                        if let Some(plan) = &plan {
+                            use crate::dragdrop::Indicator;
+                            let (l, r) = (ui.max_rect().left(), ui.max_rect().right());
+                            match &plan.indicator {
+                                Indicator::Line(y) => {
+                                    painter.hline(l..=r, *y as f32, egui::Stroke::new(3.0, accent));
+                                }
+                                Indicator::Card(cid) => {
+                                    if let Some(rc) = rects.iter().find(|x| &x.id == cid) {
+                                        let rect = egui::Rect::from_min_max(egui::pos2(l, rc.top as f32), egui::pos2(r, rc.bottom as f32));
+                                        painter.rect_stroke(rect, 4.0, egui::Stroke::new(2.0, accent), egui::StrokeKind::Inside);
+                                    }
+                                }
+                                Indicator::Unnest => {}
+                            }
+                        }
+                        if ui.ctx().input(|i| i.pointer.any_released()) {
+                            self.dragging = None;
+                            if let Some(plan) = plan {
+                                self.drop_task(&id, &plan.outcome);
+                            }
+                        } else if ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
+                            self.dragging = None;
+                        }
                     }
                 }
                 if let Some((id, was)) = clicked {
@@ -1135,8 +1196,17 @@ fn task_row_ui(
     clicked: &mut Option<(String, bool)>,
     deleted: &mut Option<String>,
     opened: &mut Option<String>,
-) {
+    drag: Option<&mut Option<String>>,
+) -> egui::Rect {
                     ui.horizontal(|ui| {
+                        if let Some(drag) = drag {
+                            let h = ui
+                                .add(egui::Label::new(RichText::new("⠿").weak()).sense(egui::Sense::drag()))
+                                .on_hover_text(tr("task.dragToNest", &HashMap::new(), Some(locale)));
+                            if h.drag_started() {
+                                *drag = Some(r.id.clone());
+                            }
+                        }
                         let mut done = r.completed;
                         let p = HashMap::from([("name".to_owned(), Some(r.subject.clone()))]);
                         let hint = tr("task.complete", &p, Some(locale));
@@ -1165,5 +1235,5 @@ fn task_row_ui(
                                 *deleted = Some(r.id.clone());
                             }
                         });
-                    });
+                    }).response.rect
 }
