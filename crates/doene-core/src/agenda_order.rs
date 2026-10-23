@@ -13,7 +13,13 @@ pub const SECTION_BREAK: &str = "break";
 /// The five My Day groups in default order. Radar sits below due today; it
 /// stays in saved orders even while hidden — visibility is a settings
 /// concern, never the registry.
-pub const GROUP_KEYS: [&str; 5] = ["overdue", "starred-due", "shortlisted", "due-today", "radar"];
+pub const GROUP_KEYS: [&str; 5] = [
+    "overdue",
+    "starred-due",
+    "shortlisted",
+    "due-today",
+    "radar",
+];
 
 /// Where the section break sits by default: after the second group.
 const BREAK_AT: usize = 2;
@@ -68,6 +74,38 @@ pub fn clean_agenda_order(a: &[Option<String>]) -> Vec<String> {
     out
 }
 
+/// The agenda order for a stored global-scope prefs value: the cleaned
+/// saved order, or the spec default when absent (Gör't's `agendaOrderFor`).
+/// The spec default as owned strings.
+pub fn default_order() -> Vec<String> {
+    DEFAULT_ORDER.map(|s| s.to_owned()).to_vec()
+}
+
+pub fn agenda_order_for(saved: Option<&[Option<String>]>) -> Vec<String> {
+    match saved {
+        Some(order) => clean_agenda_order(order),
+        None => default_order(),
+    }
+}
+
+/// The global-prefs write that saves an agenda group order (same store and
+/// shape as the drawer orders; Gör't's `agendaLayoutSave`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgendaLayoutSave {
+    /// The prefs scope; always `"global"`.
+    pub scope: &'static str,
+    /// The cleaned order stored under the `myDayGroupOrder` field.
+    pub my_day_group_order: Vec<String>,
+}
+
+/// Build the global-prefs write that saves an agenda group order.
+pub fn agenda_layout_save(order: &[Option<String>]) -> AgendaLayoutSave {
+    AgendaLayoutSave {
+        scope: "global",
+        my_day_group_order: clean_agenda_order(order),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -82,7 +120,14 @@ mod tests {
     #[test]
     fn order_keys_are_the_five_groups_plus_one_section_break() {
         assert_eq!(ORDER_KEYS.len(), 6);
-        for key in ["overdue", "starred-due", "shortlisted", "due-today", "radar", SECTION_BREAK] {
+        for key in [
+            "overdue",
+            "starred-due",
+            "shortlisted",
+            "due-today",
+            "radar",
+            SECTION_BREAK,
+        ] {
             assert!(ORDER_KEYS.contains(&key), "missing {key}");
         }
     }
@@ -94,7 +139,14 @@ mod tests {
     fn clean_drops_unknown_and_non_string_keys_and_reappends_missing_groups() {
         assert_eq!(
             clean_agenda_order(&[k("due-today"), k("bogus"), None, None]),
-            ["due-today", "overdue", SECTION_BREAK, "starred-due", "shortlisted", "radar"]
+            [
+                "due-today",
+                "overdue",
+                SECTION_BREAK,
+                "starred-due",
+                "shortlisted",
+                "radar"
+            ]
         );
     }
 
@@ -103,7 +155,14 @@ mod tests {
     fn clean_keeps_the_first_duplicate() {
         assert_eq!(
             clean_agenda_order(&[k("due-today"), k("overdue"), k("due-today")]),
-            ["due-today", "overdue", SECTION_BREAK, "starred-due", "shortlisted", "radar"]
+            [
+                "due-today",
+                "overdue",
+                SECTION_BREAK,
+                "starred-due",
+                "shortlisted",
+                "radar"
+            ]
         );
     }
 
@@ -111,7 +170,12 @@ mod tests {
     #[test]
     fn a_missing_break_is_reinserted_at_its_default_position() {
         assert_eq!(
-            clean_agenda_order(&[k("overdue"), k("starred-due"), k("shortlisted"), k("due-today")]),
+            clean_agenda_order(&[
+                k("overdue"),
+                k("starred-due"),
+                k("shortlisted"),
+                k("due-today")
+            ]),
             DEFAULT_ORDER.to_vec()
         );
     }
@@ -140,7 +204,10 @@ mod tests {
             k("shortlisted"),
             k("due-today"),
         ];
-        assert_eq!(clean_agenda_order(&o), o.into_iter().map(|x| x.unwrap()).collect::<Vec<_>>());
+        assert_eq!(
+            clean_agenda_order(&o),
+            o.into_iter().map(|x| x.unwrap()).collect::<Vec<_>>()
+        );
     }
 
     // Gör't — "at most one break survives; the first occurrence wins".
@@ -148,7 +215,14 @@ mod tests {
     fn at_most_one_break_survives_first_occurrence_wins() {
         assert_eq!(
             clean_agenda_order(&[k(SECTION_BREAK), k("overdue"), k(SECTION_BREAK)]),
-            [SECTION_BREAK, "overdue", "starred-due", "shortlisted", "due-today", "radar"]
+            [
+                SECTION_BREAK,
+                "overdue",
+                "starred-due",
+                "shortlisted",
+                "due-today",
+                "radar"
+            ]
         );
     }
 
@@ -163,7 +237,10 @@ mod tests {
             k("due-today"),
             k("radar"),
         ];
-        assert_eq!(clean_agenda_order(&o), o.into_iter().map(|x| x.unwrap()).collect::<Vec<_>>());
+        assert_eq!(
+            clean_agenda_order(&o),
+            o.into_iter().map(|x| x.unwrap()).collect::<Vec<_>>()
+        );
         let p = [
             k("overdue"),
             k("starred-due"),
@@ -172,7 +249,54 @@ mod tests {
             k("radar"),
             k(SECTION_BREAK),
         ];
-        assert_eq!(clean_agenda_order(&p), p.into_iter().map(|x| x.unwrap()).collect::<Vec<_>>());
+        assert_eq!(
+            clean_agenda_order(&p),
+            p.into_iter().map(|x| x.unwrap()).collect::<Vec<_>>()
+        );
+    }
+
+    // Gör't — "non-arrays clean to null so the caller falls back to the
+    // default": an absent saved value (Gör't's non-array inputs) falls back.
+    #[test]
+    fn an_absent_saved_order_falls_back_to_the_default() {
+        assert_eq!(agenda_order_for(None), DEFAULT_ORDER.to_vec());
+    }
+
+    // Gör't — "agendaOrderFor returns the cleaned saved order, or the spec
+    // default when absent".
+    #[test]
+    fn agenda_order_for_returns_the_cleaned_saved_order_or_the_default() {
+        assert_eq!(agenda_order_for(None), DEFAULT_ORDER.to_vec());
+        assert_eq!(
+            agenda_order_for(Some(&[k("due-today")])),
+            [
+                "due-today",
+                "overdue",
+                SECTION_BREAK,
+                "starred-due",
+                "shortlisted",
+                "radar"
+            ]
+        );
+    }
+
+    // Gör't — "agendaLayoutSave writes the cleaned order under the global scope".
+    #[test]
+    fn agenda_layout_save_writes_the_cleaned_order_under_the_global_scope() {
+        assert_eq!(
+            agenda_layout_save(&[k("due-today")]),
+            AgendaLayoutSave {
+                scope: "global",
+                my_day_group_order: vec![
+                    "due-today".to_owned(),
+                    "overdue".to_owned(),
+                    SECTION_BREAK.to_owned(),
+                    "starred-due".to_owned(),
+                    "shortlisted".to_owned(),
+                    "radar".to_owned()
+                ]
+            }
+        );
     }
 
     // Gör't — "a full custom group order round-trips unchanged".
@@ -186,6 +310,9 @@ mod tests {
             k("starred-due"),
             k("radar"),
         ];
-        assert_eq!(clean_agenda_order(&o), o.into_iter().map(|x| x.unwrap()).collect::<Vec<_>>());
+        assert_eq!(
+            clean_agenda_order(&o),
+            o.into_iter().map(|x| x.unwrap()).collect::<Vec<_>>()
+        );
     }
 }

@@ -13,6 +13,10 @@ pub mod labels;
 pub mod recurrence;
 pub mod tree;
 
+pub use agenda_order::{
+    AgendaLayoutSave, DEFAULT_ORDER, GROUP_KEYS, ORDER_KEYS, SECTION_BREAK, agenda_layout_save,
+    agenda_order_for, clean_agenda_order, default_order,
+};
 pub use dates::{Date, InvalidDate};
 pub use dnd::{DropOutcome, DropZone, GroupRect, TASK_EDGE};
 pub use entities::{
