@@ -133,10 +133,10 @@ pub fn locales() -> Vec<&'static str> {
 fn lookup(key: &str, locale: Option<&str>) -> Option<String> {
     let reg = registry().lock().expect("i18n registry poisoned");
     let tag = locale_base(locale);
-    if let Some(table) = reg.get(&tag) {
-        if let Some(value) = table.get(key) {
-            return Some(value.clone());
-        }
+    if let Some(table) = reg.get(&tag)
+        && let Some(value) = table.get(key)
+    {
+        return Some(value.clone());
     }
     if tag == DEFAULT_LOCALE {
         return None;
@@ -254,7 +254,7 @@ pub fn plural_category(locale: Option<&str>, n: f64) -> &'static str {
                 let i = (n as i64).unsigned_abs();
                 match i % 10 {
                     1 if i == 1 => "one",
-                    2 | 3 | 4 if !(12u64..=14).contains(&(i % 100)) => "few",
+                    2..=4 if !(12u64..=14).contains(&(i % 100)) => "few",
                     _ => "many",
                 }
             } else {
@@ -388,7 +388,7 @@ pub fn format_number(n: f64, locale: Option<&str>) -> String {
     let chars: Vec<char> = int_part.chars().collect();
     let mut grouped = String::new();
     for (idx, c) in chars.iter().enumerate() {
-        if idx > 0 && (chars.len() - idx) % 3 == 0 {
+        if idx > 0 && (chars.len() - idx).is_multiple_of(3) {
             grouped.push(group);
         }
         grouped.push(*c);
@@ -416,15 +416,15 @@ pub struct ErrorBody<'a> {
 /// `error` string; no body at all yields the plain translated generic.
 pub fn error_message(body: Option<&ErrorBody<'_>>, locale: Option<&str>) -> String {
     if let Some(b) = body {
-        if let Some(code) = b.code.filter(|c| !c.is_empty()) {
-            if lookup(code, locale).is_some() {
-                let p: HashMap<String, Option<String>> = b
-                    .params
-                    .iter()
-                    .map(|(k, v)| (k.clone(), Some(v.clone())))
-                    .collect();
-                return tr(code, &p, locale);
-            }
+        if let Some(code) = b.code.filter(|c| !c.is_empty())
+            && lookup(code, locale).is_some()
+        {
+            let p: HashMap<String, Option<String>> = b
+                .params
+                .iter()
+                .map(|(k, v)| (k.clone(), Some(v.clone())))
+                .collect();
+            return tr(code, &p, locale);
         }
         if let Some(error) = b.error.filter(|e| !e.is_empty()) {
             return error.to_owned();
@@ -576,7 +576,7 @@ mod tests {
             let missing: Vec<&str> = en
                 .keys()
                 .iter()
-                .filter(|k| !t.get(*k).is_some())
+                .filter(|k| t.get(k).is_none())
                 .copied()
                 .collect();
             assert!(
@@ -835,7 +835,7 @@ mod tests {
             let t = table(tag);
             for key in REQUIRED {
                 assert!(
-                    t.get(*key).is_some_and(|v| !v.is_empty()),
+                    t.get(key).is_some_and(|v| !v.is_empty()),
                     "{tag} is missing required key {key}"
                 );
             }
