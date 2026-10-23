@@ -24,15 +24,24 @@ use std::sync::OnceLock;
 use regex::Regex;
 
 use crate::dates::Date;
-use crate::entities::{RecurrenceRule, Tag};
+use crate::entities::{RecurrenceRule, RecurrenceType, RecurrenceUnit, Tag, Weekday};
+use crate::i18n;
 use crate::labels;
 
 /// Options for [`parse_quick_add`].
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ParseOptions {
     /// BCP-47 tag; only the base language is consulted. Swedish lands in
     /// ticket #04 — until then every locale parses as English.
     pub locale: Option<String>,
+    /// Parse `#tag` words (Gör't's `{ tags = true }`).
+    pub tags: bool,
+}
+
+impl Default for ParseOptions {
+    fn default() -> Self {
+        Self { locale: None, tags: true }
+    }
 }
 
 /// Importance levels understood by the parser (Gör't's `'normal'|'high'|'low'`).
@@ -74,7 +83,7 @@ pub struct ParsedQuickAdd {
 }
 
 /// Parse a quick-add line against `today`, mirroring Gör't's `parseQuickAdd`.
-pub fn parse_quick_add(text: &str, today: Date, _opts: &ParseOptions) -> ParsedQuickAdd {
+pub fn parse_quick_add(text: &str, today: Date, opts: &ParseOptions) -> ParsedQuickAdd {
     let re = en_re();
     // Gör't pads the input with spaces so every phrase is whitespace-bounded.
     let mut s = format!(" {text} ");
@@ -108,12 +117,14 @@ pub fn parse_quick_add(text: &str, today: Date, _opts: &ParseOptions) -> ParsedQ
 
     // 2. Tags: every `#word` (Gör't loops until none remain). Words stay raw
     //    here; quick-add lowercases and dedupes them.
-    while take(&re.tag, &mut s, |m| {
-        // The tag character class guarantees a non-empty word without spaces.
-        out.tags.push(Tag::new(&m[1]).expect("tag pattern yields a valid Tag"));
-        out.chips.push(chip("chip.tag", [("tag".to_owned(), m[1].to_owned())]));
-        true
-    }) {}
+    if opts.tags {
+        while take(&re.tag, &mut s, |m| {
+            // The tag character class guarantees a non-empty word without spaces.
+            out.tags.push(Tag::new(&m[1]).expect("tag pattern yields a valid Tag"));
+            out.chips.push(chip("chip.tag", [("tag".to_owned(), m[1].to_owned())]));
+            true
+        }) {}
+    }
 
     // 3. Time: `at H(am|pm)`, `H:MM(am|pm)` (optional 'at'), `at H:MM`,
     //    `at H`, `noon`/`midnight`. Out-of-range values are left in place.
@@ -146,7 +157,76 @@ pub fn parse_quick_add(text: &str, today: Date, _opts: &ParseOptions) -> ParsedQ
         true
     }) {}
 
-    // 4. Recurrence phrases (slice 3).
+    // 4. Recurrence phrases (Gör't parses these before due dates). The first
+    //    occurrence is remembered and applied after the due-date pass.
+    let mut rec_first: Option<RecFirst> = None;
+    if !take(&re.every_n_unit, &mut s, |m| {
+        let n: u32 = m[1].parse().expect("digits");
+        let unit = match m[2].to_lowercase().as_str() {
+            "day" => RecurrenceUnit::Day,
+            "week" => RecurrenceUnit::Week,
+            "month" => RecurrenceUnit::Month,
+            _ => RecurrenceUnit::Year, // 'year'
+        };
+        out.recurrence = Some(if n == 1 {
+            fixed_kind(unit_kind(unit))
+        } else {
+            RecurrenceRule {
+                kind: RecurrenceType::Custom,
+                interval: Some(n),
+                unit: Some(unit),
+                days: None,
+            }
+        });
+        true
+    }) && !take(&re.bare_kw, &mut s, |m| {
+        // Gör't's guard: the 'every' prefix admits 'weekday', bare words must
+        // be one of the six fixed keywords.
+        let every = m[0].trim().to_lowercase().starts_with("every");
+        let k = m[1].to_lowercase();
+        if !every && !matches!(k.as_str(), "daily" | "weekdays" | "weekly" | "monthly" | "yearly" | "annually") {
+            return false;
+        }
+        out.recurrence = Some(match k.as_str() {
+            _ if k.starts_with("weekday") => fixed_kind(RecurrenceType::Weekdays),
+            "daily" => fixed_kind(RecurrenceType::Daily),
+            "weekly" => fixed_kind(RecurrenceType::Weekly),
+            "monthly" => fixed_kind(RecurrenceType::Monthly),
+            _ => fixed_kind(RecurrenceType::Yearly), // 'yearly' | 'annually'
+        });
+        true
+    }) && !take(&re.every_unit, &mut s, |m| {
+        out.recurrence = Some(match m[1].to_lowercase().as_str() {
+            "day" => fixed_kind(RecurrenceType::Daily),
+            "week" => fixed_kind(RecurrenceType::Weekly),
+            "month" => fixed_kind(RecurrenceType::Monthly),
+            "year" => fixed_kind(RecurrenceType::Yearly),
+            _ => fixed_kind(RecurrenceType::Weekdays), // 'weekday'
+        });
+        true
+    }) && !take(&re.every_weekday_list, &mut s, |m| {
+        let days = every_weekday_days(&m[1]);
+        out.recurrence = Some(if days.len() == 1 {
+            fixed_kind(RecurrenceType::Weekly)
+        } else {
+            RecurrenceRule {
+                kind: RecurrenceType::Custom,
+                interval: Some(1),
+                unit: Some(RecurrenceUnit::Week),
+                days: Some(days.iter().map(|d| Weekday::from_dow(*d).expect("valid dow")).collect()),
+            }
+        });
+        rec_first = Some(RecFirst::Weekdays(days));
+        true
+    }) && !take(&re.every_nth, &mut s, |m| {
+        let n: u32 = m[1].parse().expect("digits");
+        if !(1..=31).contains(&n) {
+            return false;
+        }
+        out.recurrence = Some(fixed_kind(RecurrenceType::Monthly));
+        rec_first = Some(RecFirst::Nth(n));
+        true
+    }) {}
 
     // 5. Due date: day words, `in N unit`, `next week/month`, weekday names,
     //    explicit ISO dates.
@@ -194,7 +274,28 @@ pub fn parse_quick_add(text: &str, today: Date, _opts: &ParseOptions) -> ParsedQ
         Err(_) => false,
     }) {}
 
-    // 6. Recurrence first-occurrence due date (slice 3).
+    // 6. A recurrence without an explicit date is due at its first occurrence,
+    //    labelled 'first occurrence' through the locale table.
+    if out.recurrence.is_some() && out.due_date.is_none() {
+        // No explicit date: the first occurrence is due, labelled through the
+        // locale table. An explicit date wins over `rec_first`.
+        let first = match &rec_first {
+            Some(RecFirst::Weekdays(days)) => first_weekday_occurrence(today, days),
+            Some(RecFirst::Nth(n)) => next_day_of_month(today, *n),
+            None => Some(today),
+        };
+        if let Some(date) = first {
+            set_due_labeled(&mut out, date, i18n::tr("recurrence.firstOccurrence", &HashMap::new(), Some("en")));
+        }
+    }
+    // The repeat chip is emitted for every parsed recurrence, explicit date or
+    // not (Gör't emits it after the first-occurrence block).
+    if let Some(rule) = &out.recurrence {
+        out.chips.push(chip(
+            "chip.repeat",
+            [("rule".to_owned(), labels::rec_label(rule, Some("en"), i18n::week_start(Some("en"))))],
+        ));
+    }
 
     // 7. A time pins a reminder: the due date defaults to today.
     if let Some(time) = out.time.clone() {
@@ -221,6 +322,11 @@ struct EnRe {
     hhmm: Regex,
     hh: Regex,
     noonmid: Regex,
+    every_n_unit: Regex,
+    bare_kw: Regex,
+    every_unit: Regex,
+    every_weekday_list: Regex,
+    every_nth: Regex,
     day_words: Regex,
     in_n_unit: Regex,
     next_week: Regex,
@@ -242,6 +348,17 @@ fn en_re() -> &'static EnRe {
         hhmm: Regex::new(r"(?i)\sat\s+([0-9]{1,2}):([0-9]{2})\s").expect("valid pattern"),
         hh: Regex::new(r"(?i)\sat\s+([0-9]{1,2})\s").expect("valid pattern"),
         noonmid: Regex::new(r"(?i)\s(noon|midnight)\s").expect("valid pattern"),
+        every_n_unit: Regex::new(r"(?i)\severy\s+([0-9]+)\s*(day|week|month|year)s?\s")
+            .expect("valid pattern"),
+        bare_kw: Regex::new(
+            r"(?i)\s(?:every\s+)?(daily|weekdays?|weekly|monthly|yearly|annually)\s",
+        )
+        .expect("valid pattern"),
+        every_unit: Regex::new(r"(?i)\severy\s+(day|week|month|year|weekday)\s")
+            .expect("valid pattern"),
+        every_weekday_list: Regex::new(&format!(r"(?i)\severy\s+({WD_RE}(?:\s*(?:,|and|&)\s*{WD_RE})*)\s"))
+            .expect("valid pattern"),
+        every_nth: Regex::new(r"(?i)\severy\s+([0-9]{1,2})(?:st|nd|rd|th)\s").expect("valid pattern"),
         day_words: Regex::new(r"(?i)\s(today|tonight|tomorrow|tmrw|yesterday)\s")
             .expect("valid pattern"),
         in_n_unit: Regex::new(r"(?i)\sin\s+([0-9]+)\s*(day|week|month)s?\s").expect("valid pattern"),
@@ -298,8 +415,79 @@ fn wd_index(word: &str) -> u8 {
 }
 
 /// Gör't's `nextWeekday`: the first occurrence of weekday `d` strictly after
-/// `from`.
+/// `from` (Gör't: `(d - dow + 7) % 7 || 7`).
 fn next_weekday(from: Date, d: u8) -> Date {
-    let n = ((i64::from(d) - i64::from(from.dow()) + 7) % 7).max(1);
-    from.add_days(n)
+    let n = (i64::from(d) - i64::from(from.dow()) + 7) % 7;
+    from.add_days(if n == 0 { 7 } else { n })
+}
+
+/// A fixed-kind recurrence rule (`daily`, `weekly`, …).
+fn fixed_kind(kind: RecurrenceType) -> RecurrenceRule {
+    RecurrenceRule { kind, interval: None, unit: None, days: None }
+}
+
+/// Gör't's `UNIT_TYPE`: the fixed kind a unit collapses to at interval 1.
+fn unit_kind(unit: RecurrenceUnit) -> RecurrenceType {
+    match unit {
+        RecurrenceUnit::Day => RecurrenceType::Daily,
+        RecurrenceUnit::Week => RecurrenceType::Weekly,
+        RecurrenceUnit::Month => RecurrenceType::Monthly,
+        RecurrenceUnit::Year => RecurrenceType::Yearly,
+    }
+}
+
+/// The first-occurrence hook Gör't remembers while parsing a recurrence.
+enum RecFirst {
+    /// A weekday list (sorted, unique dow numbers 0 = Sunday … 6).
+    Weekdays(Vec<u8>),
+    /// An `every Nth` day-of-month rule.
+    Nth(u32),
+}
+
+/// Gör't's `everyWeekday` split: dedupe + sort the weekday list (dow numbers).
+/// Separators are `,`, `and`, `&` with optional surrounding whitespace
+/// (Gör't's `/\s*(?:,|och|and|&)\s*/i`; `och` is Swedish and ticket #04).
+fn every_weekday_days(list: &str) -> Vec<u8> {
+    static SEP: OnceLock<Regex> = OnceLock::new();
+    let sep = SEP.get_or_init(|| Regex::new(r"(?i)\s*(?:,|and|&)\s*").expect("valid pattern"));
+    let mut days: Vec<u8> = sep
+        .split(list)
+        .map(str::trim)
+        .filter(|w| !w.is_empty())
+        .map(wd_index)
+        .collect();
+    days.sort_unstable();
+    days.dedup();
+    days
+}
+
+/// Gör't's `recFirst` for weekday lists: the first listed day strictly after
+/// `from` (single-day lists use [`next_weekday`]).
+fn first_weekday_occurrence(from: Date, days: &[u8]) -> Option<Date> {
+    let dow = from.dow();
+    if days.len() == 1 {
+        return Some(next_weekday(from, days[0]));
+    }
+    match days.iter().find(|&&d| d > dow) {
+        Some(&d) => Some(from.add_days(i64::from(d - dow))),
+        None => Some(from.add_days(7 - i64::from(dow) + i64::from(days[0]))),
+    }
+}
+
+/// Gör't's `nextDayOfMonth`: the first occurrence of day `n` strictly after
+/// `from`, clamped to shorter months (the 31st of a 30-day month lands on its
+/// last day).
+fn next_day_of_month(from: Date, n: u32) -> Option<Date> {
+    for i in 0..14i64 {
+        let total = from.year as i64 * 12 + i64::from(from.month) - 1 + i;
+        let year = total.div_euclid(12);
+        let month = (total.rem_euclid(12) + 1) as u8;
+        let day = n.min(u32::from(Date::days_in_month(month, year as i32))) as u8;
+        if let Ok(c) = Date::parse(&format!("{year:04}-{month:02}-{day:02}")) {
+            if c > from {
+                return Some(c);
+            }
+        }
+    }
+    None
 }
