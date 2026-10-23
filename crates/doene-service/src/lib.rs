@@ -13,5 +13,5 @@ mod snapshot;
 pub use doene_core::CodedError;
 pub use service::{
     Clock, NewTask, Service, ServiceError, Settings, StepPatch, TaskPatch, TrashItem, Restored,
-    UpdateOutcome, TRASH_DAYS,
+    UndoKind, UpdateOutcome, TRASH_DAYS,
 };

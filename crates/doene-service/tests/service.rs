@@ -332,3 +332,60 @@ fn theme_setting_defaults_to_system_validates_and_persists() {
     assert_eq!(code(f.svc.set_setting("theme", json!("pink"))), "error.unsupportedTheme");
     assert_eq!(f.svc.settings().unwrap().theme, "dark");
 }
+
+// ---- ticket #12: undo
+
+#[test]
+fn undo_restores_deleted_subtree_and_trash() {
+    let f = fixture();
+    let p = f.svc.create_task(new("parent")).unwrap();
+    let c = f.svc.create_task(NewTask { subject: "child".into(), parent_id: Some(p.task.id.clone()), ..Default::default() }).unwrap();
+    f.svc.create_step(&c.task.id, "step").unwrap();
+    f.svc.delete_task(&p.task.id).unwrap();
+    assert!(f.svc.all_tasks().unwrap().is_empty());
+    assert_eq!(f.svc.undo_peek(), Some(doene_service::UndoKind::Delete));
+    assert_eq!(f.svc.undo().unwrap(), Some(doene_service::UndoKind::Delete));
+    let all = f.svc.all_tasks().unwrap();
+    assert_eq!(all.len(), 2);
+    assert_eq!(f.svc.task(&c.task.id).unwrap().steps.len(), 1);
+    assert_eq!(f.svc.task(&c.task.id).unwrap().task.parent_id.as_deref(), Some(p.task.id.as_str()));
+    assert!(f.svc.trash().unwrap().is_empty());
+}
+
+#[test]
+fn undo_spans_operation_types_in_order() {
+    let f = fixture();
+    let t = f.svc.create_task(new("a")).unwrap();
+    f.svc.update_task(&t.task.id, TaskPatch { subject: Some("b".into()), ..Default::default() }).unwrap();
+    f.svc.create_step(&t.task.id, "s").unwrap();
+    f.svc.undo().unwrap();
+    assert!(f.svc.task(&t.task.id).unwrap().steps.is_empty());
+    f.svc.undo().unwrap();
+    assert_eq!(f.svc.task(&t.task.id).unwrap().task.subject, "a");
+    f.svc.undo().unwrap();
+    assert!(f.svc.all_tasks().unwrap().is_empty());
+    assert_eq!(f.svc.undo().unwrap(), None);
+}
+
+#[test]
+fn undo_restore_and_permanent_delete() {
+    let f = fixture();
+    let t = f.svc.create_task(new("a")).unwrap();
+    let tid = f.svc.delete_task(&t.task.id).unwrap();
+    f.svc.restore(&tid).unwrap();
+    assert_eq!(f.svc.all_tasks().unwrap().len(), 1);
+    f.svc.undo().unwrap();
+    assert!(f.svc.all_tasks().unwrap().is_empty());
+    assert_eq!(f.svc.trash().unwrap().len(), 1);
+    f.svc.delete_forever(&tid).unwrap();
+    assert!(f.svc.trash().unwrap().is_empty());
+    f.svc.undo().unwrap();
+    assert_eq!(f.svc.trash().unwrap().len(), 1);
+}
+
+#[test]
+fn failed_mutation_records_no_undo() {
+    let f = fixture();
+    assert!(f.svc.delete_task("nope").is_err());
+    assert_eq!(f.svc.undo_peek(), None);
+}
