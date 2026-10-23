@@ -5,6 +5,7 @@
 //! `DöneApp` state and egui rendering (thin, not unit-tested).
 
 mod app;
+pub mod dragdrop;
 pub mod drawer;
 pub mod model;
 pub mod myday;
