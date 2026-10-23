@@ -149,3 +149,18 @@ pub fn views(conn: &Connection) -> rusqlite::Result<Vec<doene_core::View>> {
     }
     Ok(views)
 }
+
+/// A pref's stored text for a scope, if saved.
+pub fn pref(conn: &Connection, scope: &str) -> rusqlite::Result<Option<String>> {
+    conn.query_row("SELECT value FROM prefs WHERE scope = ?1", params![scope], |r| r.get(0))
+        .optional()
+}
+
+/// Upsert a pref's text for a scope.
+pub fn set_pref(conn: &Connection, scope: &str, value: &str) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT INTO prefs (scope, value) VALUES (?1, ?2) ON CONFLICT(scope) DO UPDATE SET value = excluded.value",
+        params![scope, value],
+    )?;
+    Ok(())
+}

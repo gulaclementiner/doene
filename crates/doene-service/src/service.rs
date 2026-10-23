@@ -873,6 +873,29 @@ impl Service {
         })
     }
 
+    // ---- prefs
+
+    /// A pref value for a scope (e.g. `drawer:<taskId>`), if saved.
+    pub fn pref(&self, scope: &str) -> Res<Option<String>> {
+        Ok(aux::pref(self.storage.conn(), scope)?)
+    }
+
+    /// Save a pref. Scopes are `drawer:<taskId>`; the value must be non-empty.
+    /// Not undoable: layout prefs do not touch task/trash state.
+    pub fn set_pref(&self, scope: &str, value: &str) -> Res<()> {
+        if !scope.starts_with("drawer:") || scope.len() == "drawer:".len() {
+            return Err(ServiceError::Coded(CodedError {
+                code: "error.unknownPrefScope",
+                message: "unknown preference scope".into(),
+                params: vec![("scope", scope.to_owned())],
+            }));
+        }
+        if value.trim().is_empty() {
+            return Err(coded("error.prefValueRequired", "preference value required"));
+        }
+        self.tx(|c, _| Ok(aux::set_pref(c, scope, value)?))
+    }
+
     // ---- settings
 
     /// Current settings.
