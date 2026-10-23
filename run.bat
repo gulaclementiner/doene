@@ -16,8 +16,8 @@ if errorlevel 1 if exist "%USERPROFILE%\.cargo\bin\cargo.exe" set "PATH=%USERPRO
 where cargo >nul 2>&1
 if errorlevel 1 (
   echo cargo was not found on PATH.
-  echo Install Rust from https://rustup.rs (choose the default MSVC toolchain;
-  echo it will also ask for the Visual Studio Build Tools), then retry.
+  echo Install Rust from https://rustup.rs using the default MSVC toolchain,
+  echo which also asks for the Visual Studio Build Tools, then retry.
   popd & pause & exit /b 1
 )
 
