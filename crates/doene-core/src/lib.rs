@@ -3,6 +3,7 @@
 //! No I/O, no UI dependencies (docs/plan.md §3). The public API is
 //! deliberately small: entities, read-model builders, and pure rule functions.
 
+pub mod agenda_order;
 pub mod dates;
 pub mod dnd;
 pub mod entities;
