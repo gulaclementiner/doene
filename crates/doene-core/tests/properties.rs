@@ -4,7 +4,9 @@
 //! ranges.
 
 use doene_core::dates::Date;
-use doene_core::entities::{HydratedTask, Importance, RecurrenceType, RecurrenceUnit, Task, TaskStatus};
+use doene_core::entities::{
+    HydratedTask, Importance, RecurrenceType, RecurrenceUnit, Task, TaskStatus,
+};
 use doene_core::recurrence::{RawRecurrence, next_date, next_on_or_after, validate};
 use doene_core::search::search_tasks;
 use proptest::prelude::*;

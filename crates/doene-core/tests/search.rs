@@ -10,12 +10,7 @@ fn T(subject: &str) -> HydratedTask {
     t_with(subject, None, &[], TaskStatus::Open)
 }
 
-fn t_with(
-    subject: &str,
-    body: Option<&str>,
-    steps: &[&str],
-    status: TaskStatus,
-) -> HydratedTask {
+fn t_with(subject: &str, body: Option<&str>, steps: &[&str], status: TaskStatus) -> HydratedTask {
     let task = Task {
         id: String::new(),
         subject: subject.to_owned(),
@@ -54,46 +49,67 @@ fn t_with(
 #[test]
 fn search_score_exact_tiers() {
     assert_eq!(score(&T("Buy milk now"), &["milk".into()]), 6, "whole word");
-    assert_eq!(score(&T("milkshake time"), &["milk".into()]), 5, "subject prefix");
+    assert_eq!(
+        score(&T("milkshake time"), &["milk".into()]),
+        5,
+        "subject prefix"
+    );
     assert_eq!(score(&T("a milkshake"), &["milk".into()]), 4, "word prefix");
     assert_eq!(score(&T("almilk"), &["milk".into()]), 3, "substring");
     assert_eq!(
-        score(&t_with("x", None, &["get MILK"], TaskStatus::Open), &["milk".into()]),
+        score(
+            &t_with("x", None, &["get MILK"], TaskStatus::Open),
+            &["milk".into()]
+        ),
         2,
         "step"
     );
     assert_eq!(
-        score(&t_with("x", Some("some Milk"), &[], TaskStatus::Open), &["milk".into()]),
+        score(
+            &t_with("x", Some("some Milk"), &[], TaskStatus::Open),
+            &["milk".into()]
+        ),
         1,
         "body"
     );
     assert_eq!(score(&T("x"), &["milk".into()]), 0);
     assert_eq!(
-        score(&t_with("milk", Some("zz"), &[], TaskStatus::Open), &["milk".into(), "zz".into()]),
+        score(
+            &t_with("milk", Some("zz"), &[], TaskStatus::Open),
+            &["milk".into(), "zz".into()]
+        ),
         7,
         "sums"
     );
-    assert_eq!(score(&T("milk"), &["milk".into(), "zz".into()]), 0, "all words must match");
-    assert_eq!(score(&T("hello, world"), &["world".into()]), 6, "punctuation splits words");
+    assert_eq!(
+        score(&T("milk"), &["milk".into(), "zz".into()]),
+        0,
+        "all words must match"
+    );
+    assert_eq!(
+        score(&T("hello, world"), &["world".into()]),
+        6,
+        "punctuation splits words"
+    );
     assert_eq!(score(&T("a-milk"), &["milk".into()]), 6);
     // Gör't's `score({subject:'x'}, ['x'])` — missing steps/body ok.
     let bare = HydratedTask::bare(Task {
-            id: String::new(),
-            subject: "x".to_owned(),
-            status: TaskStatus::Open,
-            importance: Importance::Normal,
-            due_date: None,
-            reminder_at: None,
-            body: None,
-            focus_date: None,
-            postponed_date: None,
-            created_at: String::new(),
-            completed_at: None,
-            position: 0.0,
-            spawned_from: None,
-            parent_id: None,
-            recurrence: None,
-        });
+        id: String::new(),
+        subject: "x".to_owned(),
+        status: TaskStatus::Open,
+        importance: Importance::Normal,
+        due_date: None,
+        reminder_at: None,
+        body: None,
+        focus_date: None,
+        postponed_date: None,
+        created_at: String::new(),
+        completed_at: None,
+        position: 0.0,
+        spawned_from: None,
+        parent_id: None,
+        recurrence: None,
+    });
     assert_eq!(score(&bare, &["x".into()]), 6);
     assert_eq!(
         score(
@@ -102,19 +118,32 @@ fn search_score_exact_tiers() {
         ),
         2
     );
-    assert_eq!(score(&T("The Quick"), &["quick".into()]), 6, "case-insensitive subject");
+    assert_eq!(
+        score(&T("The Quick"), &["quick".into()]),
+        6,
+        "case-insensitive subject"
+    );
     assert_eq!(score(&T("quick"), &["quick".into()]), 6);
     assert_eq!(
-        score(&t_with("x", Some("QUICK"), &[], TaskStatus::Open), &["quick".into()]),
+        score(
+            &t_with("x", Some("QUICK"), &[], TaskStatus::Open),
+            &["quick".into()]
+        ),
         1,
         "case-insensitive body"
     );
     assert_eq!(
-        score(&t_with("x", None, &["QUICK"], TaskStatus::Open), &["quick".into()]),
+        score(
+            &t_with("x", None, &["QUICK"], TaskStatus::Open),
+            &["quick".into()]
+        ),
         2,
         "case-insensitive step"
     );
-    assert_eq!(score(&t_with("xx", None, &[], TaskStatus::Open), &["q".into()]), 0);
+    assert_eq!(
+        score(&t_with("xx", None, &[], TaskStatus::Open), &["q".into()]),
+        0
+    );
 }
 
 #[test]
@@ -125,8 +154,24 @@ fn search_empty_blank_query_returns_nothing_and_is_case_space_tolerant() {
     // Gör't's `searchTasks(ts, null)` case: a null query is not representable
     // in Rust; the empty string covers it.
     assert_eq!(search_tasks(&ts, "  ALPHA  ", 50).len(), 1);
-    assert_eq!(search_tasks(&[t_with("red apple", None, &[], TaskStatus::Open)], "red\tapple", 50).len(), 1);
-    assert_eq!(search_tasks(&[t_with("red apple", None, &[], TaskStatus::Open)], "red\napple", 50).len(), 1);
+    assert_eq!(
+        search_tasks(
+            &[t_with("red apple", None, &[], TaskStatus::Open)],
+            "red\tapple",
+            50
+        )
+        .len(),
+        1
+    );
+    assert_eq!(
+        search_tasks(
+            &[t_with("red apple", None, &[], TaskStatus::Open)],
+            "red\napple",
+            50
+        )
+        .len(),
+        1
+    );
     assert_eq!(search_tasks(&ts, "nomatch", 50).len(), 0);
 }
 
@@ -188,7 +233,12 @@ fn search_ranks_subject_over_steps_over_notes() {
     // Gör't's nlp-search fixture (ids 1..4).
     let mut tasks = vec![
         t_with("Buy milk", Some(""), &[], TaskStatus::Open),
-        t_with("Plan trip", Some("remember to buy sunscreen"), &["book hotel"], TaskStatus::Open),
+        t_with(
+            "Plan trip",
+            Some("remember to buy sunscreen"),
+            &["book hotel"],
+            TaskStatus::Open,
+        ),
         t_with("Milkshake machine", Some(""), &[], TaskStatus::Completed),
         t_with("Email Bob", Some(""), &[], TaskStatus::Open),
     ];
