@@ -146,6 +146,8 @@ pub struct Settings {
     pub add_tasks_to_top: bool,
     pub focus_mode: FocusMode,
     pub language: String,
+    /// `light`, `dark` or `system` (default).
+    pub theme: String,
 }
 
 struct Ctx {
@@ -217,6 +219,9 @@ fn settings_in(conn: &Connection) -> Res<Settings> {
         language: get("language")?
             .and_then(|v| v.as_str().map(str::to_owned))
             .unwrap_or_else(|| "en".into()),
+        theme: get("theme")?
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .unwrap_or_else(|| "system".into()),
     })
 }
 
@@ -799,7 +804,14 @@ impl Service {
                         params: vec![("mode", show(value.as_str()))],
                     }));
                 }
-                "addTasksToTop" | "language" | "focusMode" => {}
+                "theme" if !matches!(value.as_str(), Some("light" | "dark" | "system")) => {
+                    return Err(ServiceError::Coded(CodedError {
+                        code: "error.unsupportedTheme",
+                        message: "unsupported theme".into(),
+                        params: vec![("theme", show(value.as_str()))],
+                    }));
+                }
+                "addTasksToTop" | "language" | "focusMode" | "theme" => {}
                 _ => {
                     return Err(ServiceError::Coded(CodedError {
                         code: "error.unknownSetting",

@@ -323,3 +323,12 @@ fn data_survives_reopening_the_database() {
     let svc = Service::new(Storage::open(&path).unwrap());
     assert_eq!(svc.task(&id).unwrap().task.subject, "persist");
 }
+
+#[test]
+fn theme_setting_defaults_to_system_validates_and_persists() {
+    let f = fixture();
+    assert_eq!(f.svc.settings().unwrap().theme, "system");
+    assert_eq!(f.svc.set_setting("theme", json!("dark")).unwrap().theme, "dark");
+    assert_eq!(code(f.svc.set_setting("theme", json!("pink"))), "error.unsupportedTheme");
+    assert_eq!(f.svc.settings().unwrap().theme, "dark");
+}
