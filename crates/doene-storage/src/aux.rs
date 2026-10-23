@@ -108,8 +108,12 @@ pub fn activity_of(conn: &Connection, task_id: &str) -> rusqlite::Result<Vec<Act
 
 /// A setting's stored text (JSON), if saved.
 pub fn setting(conn: &Connection, key: &str) -> rusqlite::Result<Option<String>> {
-    conn.query_row("SELECT value FROM settings WHERE key = ?1", params![key], |r| r.get(0))
-        .optional()
+    conn.query_row(
+        "SELECT value FROM settings WHERE key = ?1",
+        params![key],
+        |r| r.get(0),
+    )
+    .optional()
 }
 
 /// Upsert a setting's text.
@@ -133,7 +137,11 @@ pub fn views(conn: &Connection) -> rusqlite::Result<Vec<doene_core::View>> {
                 id: r.get(0)?,
                 name: r.get(1)?,
                 emoji: r.get(2)?,
-                match_mode: if r.get::<_, String>(3)? == "all" { MatchMode::All } else { MatchMode::Any },
+                match_mode: if r.get::<_, String>(3)? == "all" {
+                    MatchMode::All
+                } else {
+                    MatchMode::Any
+                },
                 show_done: r.get::<_, i64>(4)? != 0,
                 position: r.get(5)?,
                 tags: vec![],
@@ -152,8 +160,12 @@ pub fn views(conn: &Connection) -> rusqlite::Result<Vec<doene_core::View>> {
 
 /// A pref's stored text for a scope, if saved.
 pub fn pref(conn: &Connection, scope: &str) -> rusqlite::Result<Option<String>> {
-    conn.query_row("SELECT value FROM prefs WHERE scope = ?1", params![scope], |r| r.get(0))
-        .optional()
+    conn.query_row(
+        "SELECT value FROM prefs WHERE scope = ?1",
+        params![scope],
+        |r| r.get(0),
+    )
+    .optional()
 }
 
 /// Upsert a pref's text for a scope.
@@ -173,7 +185,10 @@ pub fn fired_keys(conn: &Connection) -> rusqlite::Result<Vec<String>> {
 
 /// Record `key` as fired at `at` (no-op if already recorded).
 pub fn mark_fired(conn: &Connection, key: &str, at: &str) -> rusqlite::Result<()> {
-    conn.execute("INSERT OR IGNORE INTO fired_notifications (key, at) VALUES (?1, ?2)", params![key, at])?;
+    conn.execute(
+        "INSERT OR IGNORE INTO fired_notifications (key, at) VALUES (?1, ?2)",
+        params![key, at],
+    )?;
     Ok(())
 }
 
@@ -187,11 +202,17 @@ pub fn prune_fired(conn: &Connection, keep: usize) -> rusqlite::Result<usize> {
 
 /// Every activity row in insertion order (for export).
 pub fn all_activity(conn: &Connection) -> rusqlite::Result<Vec<(String, ActivityRow)>> {
-    let mut stmt = conn.prepare("SELECT id, task_id, at, action, detail FROM activity ORDER BY rowid")?;
+    let mut stmt =
+        conn.prepare("SELECT id, task_id, at, action, detail FROM activity ORDER BY rowid")?;
     stmt.query_map([], |r| {
         Ok((
             r.get(0)?,
-            ActivityRow { task_id: r.get(1)?, at: r.get(2)?, action: r.get(3)?, detail: r.get(4)? },
+            ActivityRow {
+                task_id: r.get(1)?,
+                at: r.get(2)?,
+                action: r.get(3)?,
+                detail: r.get(4)?,
+            },
         ))
     })?
     .collect()
@@ -200,13 +221,15 @@ pub fn all_activity(conn: &Connection) -> rusqlite::Result<Vec<(String, Activity
 /// Every setting `(key, text)` ordered by key.
 pub fn all_settings(conn: &Connection) -> rusqlite::Result<Vec<(String, String)>> {
     let mut stmt = conn.prepare("SELECT key, value FROM settings ORDER BY key")?;
-    stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()
+    stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect()
 }
 
 /// Every pref `(scope, text)` ordered by scope.
 pub fn all_prefs(conn: &Connection) -> rusqlite::Result<Vec<(String, String)>> {
     let mut stmt = conn.prepare("SELECT scope, value FROM prefs ORDER BY scope")?;
-    stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()
+    stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect()
 }
 
 /// Delete all activity, settings and prefs rows (the aux part of an import wipe).

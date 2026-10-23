@@ -316,7 +316,7 @@ pub fn parse_quick_add(text: &str, today: Date, opts: &ParseOptions) -> ParsedQu
     //    `at H`, `noon`/`midnight`. Out-of-range values are left in place.
     if !take(&re.ampm, &mut s, |m| {
         let h: i64 = m[1].parse().expect("digits");
-        if h > 12 || h < 1 {
+        if !(1..=12).contains(&h) {
             return false;
         }
         let min = m.get(2).map(|c| c.as_str()).unwrap_or("00").to_owned();
@@ -354,7 +354,8 @@ pub fn parse_quick_add(text: &str, today: Date, opts: &ParseOptions) -> ParsedQu
             out.time = Some(format!("{h:02}:00"));
             true
         })
-        && !take(&re.noonmid, &mut s, |m| {
+    {
+        take(&re.noonmid, &mut s, |m| {
             out.time = Some(
                 if m[1].eq_ignore_ascii_case("noon") {
                     "12:00"
@@ -364,8 +365,8 @@ pub fn parse_quick_add(text: &str, today: Date, opts: &ParseOptions) -> ParsedQu
                 .to_owned(),
             );
             true
-        })
-    {}
+        });
+    }
 
     // 4. Recurrence phrases (Gör't parses these before due dates). The first
     //    occurrence is remembered and applied after the due-date pass.
@@ -484,12 +485,13 @@ pub fn parse_quick_add(text: &str, today: Date, opts: &ParseOptions) -> ParsedQu
                 rec_first = Some(RecFirst::Nth(n));
                 true
             }))
-        && !(sv
-            && take(&re.sv_every_unit, &mut s, |m| {
-                out.recurrence = Some(fixed_kind(unit_kind(sv_unit(&m[1]))));
-                true
-            }))
-    {}
+        && sv
+    {
+        take(&re.sv_every_unit, &mut s, |m| {
+            out.recurrence = Some(fixed_kind(unit_kind(sv_unit(&m[1]))));
+            true
+        });
+    }
 
     // 5. Due date: day words, `in N unit`, `next week/month`, weekday names,
     //    explicit ISO dates.
@@ -583,20 +585,21 @@ pub fn parse_quick_add(text: &str, today: Date, opts: &ParseOptions) -> ParsedQu
             }
             Err(_) => false,
         })
-        && !(sv
-            && take(&re.sv_dmy, &mut s, |m| {
-                let day: u8 = m[1].parse().unwrap_or(0);
-                let month: u8 = m[2].parse().unwrap_or(0);
-                let date = match m.get(3) {
-                    Some(y) => ymd(y.as_str().parse().expect("4 digits"), month, day),
-                    None => next_dmy(today, month, day),
-                };
-                // 31/2 and 15/13 are not dates: the token stays in the subject.
-                let Some(date) = date else { return false };
-                set_due(&mut out, date);
-                true
-            }))
-    {}
+        && sv
+    {
+        take(&re.sv_dmy, &mut s, |m| {
+            let day: u8 = m[1].parse().unwrap_or(0);
+            let month: u8 = m[2].parse().unwrap_or(0);
+            let date = match m.get(3) {
+                Some(y) => ymd(y.as_str().parse().expect("4 digits"), month, day),
+                None => next_dmy(today, month, day),
+            };
+            // 31/2 and 15/13 are not dates: the token stays in the subject.
+            let Some(date) = date else { return false };
+            set_due(&mut out, date);
+            true
+        });
+    }
 
     // 6. A recurrence without an explicit date is due at its first occurrence,
     //    labelled 'first occurrence' through the locale table.
@@ -964,10 +967,10 @@ fn next_day_of_month(from: Date, n: u32) -> Option<Date> {
         let year = total.div_euclid(12);
         let month = (total.rem_euclid(12) + 1) as u8;
         let day = n.min(u32::from(Date::days_in_month(month, year as i32))) as u8;
-        if let Ok(c) = Date::parse(&format!("{year:04}-{month:02}-{day:02}")) {
-            if c > from {
-                return Some(c);
-            }
+        if let Ok(c) = Date::parse(&format!("{year:04}-{month:02}-{day:02}"))
+            && c > from
+        {
+            return Some(c);
         }
     }
     None

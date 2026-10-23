@@ -13,8 +13,14 @@ fn sv(id: &str, pos: f64) -> views::SavedView {
             tags: vec![Tag::new("b").unwrap(), Tag::new("a").unwrap()],
         },
         sorts: vec![
-            SortLevel { by: SortKey::Due, dir: SortDirection::Desc },
-            SortLevel { by: SortKey::Name, dir: SortDirection::Asc },
+            SortLevel {
+                by: SortKey::Due,
+                dir: SortDirection::Desc,
+            },
+            SortLevel {
+                by: SortKey::Name,
+                dir: SortDirection::Asc,
+            },
         ],
     }
 }
@@ -36,12 +42,22 @@ fn round_trip_update_delete() {
     upd.view.tags.truncate(1);
     views::update(c, &upd).unwrap();
     assert_eq!(views::get(c, "v1").unwrap().unwrap().sorts.len(), 1);
-    let ids: Vec<_> = views::all(c).unwrap().into_iter().map(|v| v.view.id).collect();
+    let ids: Vec<_> = views::all(c)
+        .unwrap()
+        .into_iter()
+        .map(|v| v.view.id)
+        .collect();
     assert_eq!(ids, ["v2", "v1"]);
     assert_eq!(views::max_position(c).unwrap(), Some(3.0));
 
     views::delete(c, "v1").unwrap();
     assert!(views::get(c, "v1").unwrap().is_none());
-    let n: i64 = c.query_row("SELECT COUNT(*) FROM view_sorts WHERE view_id='v1'", [], |r| r.get(0)).unwrap();
+    let n: i64 = c
+        .query_row(
+            "SELECT COUNT(*) FROM view_sorts WHERE view_id='v1'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
     assert_eq!(n, 0);
 }

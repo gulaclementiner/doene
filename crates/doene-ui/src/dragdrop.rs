@@ -5,7 +5,9 @@
 //! [`DropOutcome`] is applied by `reorder::apply_outcome` (same path as keys).
 
 use crate::reorder::Tree;
-use doene_core::dnd::{DropOutcome, DropZone, GroupRect, build_zones, deepest_zone_at, drop_result};
+use doene_core::dnd::{
+    DropOutcome, DropZone, GroupRect, build_zones, deepest_zone_at, drop_result,
+};
 use doene_core::tree::can_nest;
 
 /// Measured vertical extent of one visible task row.
@@ -63,7 +65,10 @@ fn levels(tree: &Tree, rows: &[RowRect], dragged: &str) -> Vec<Level> {
     parents.sort_by_key(depth);
     parents
         .into_iter()
-        .filter(|p| p.as_deref().is_none_or(|p| p != dragged && can_nest(dragged, p, &tree.parents)))
+        .filter(|p| {
+            p.as_deref()
+                .is_none_or(|p| p != dragged && can_nest(dragged, p, &tree.parents))
+        })
         .map(|parent| {
             let mut ids = Vec::new();
             let mut groups = Vec::new();
@@ -89,12 +94,21 @@ fn levels(tree: &Tree, rows: &[RowRect], dragged: &str) -> Vec<Level> {
                     bottom = n.bottom;
                 }
                 ids.push(r.id.clone());
-                groups.push(GroupRect { bottom, card_top: r.top, card_height: r.bottom - r.top });
+                groups.push(GroupRect {
+                    bottom,
+                    card_top: r.top,
+                    card_height: r.bottom - r.top,
+                });
             }
             let top = groups.first().map_or(0.0, |g| g.card_top);
             let bottom = groups.last().map_or(0.0, |g| g.bottom);
             let zones = build_zones(&groups, top, bottom, parent.as_deref());
-            Level { parent, ids, groups, zones }
+            Level {
+                parent,
+                ids,
+                groups,
+                zones,
+            }
         })
         .collect()
 }
@@ -107,33 +121,63 @@ fn real_index(tree: &Tree, level: &Level, dragged: &str, at: usize) -> usize {
         .map(|v| v.iter().filter(|s| *s != dragged).collect())
         .unwrap_or_default();
     let vis: Vec<&String> = level.ids.iter().filter(|s| *s != dragged).collect();
-    let dragged_before = level.ids.iter().position(|s| s == dragged).is_some_and(|i| i < at);
+    let dragged_before = level
+        .ids
+        .iter()
+        .position(|s| s == dragged)
+        .is_some_and(|i| i < at);
     let at = at - usize::from(dragged_before);
     let pos = |id: &String| full.iter().position(|f| *f == id);
     match vis.get(at) {
         Some(t) => pos(t).unwrap_or(full.len()),
-        None => vis.last().and_then(|l| pos(l)).map_or(full.len(), |i| i + 1),
+        None => vis
+            .last()
+            .and_then(|l| pos(l))
+            .map_or(full.len(), |i| i + 1),
     }
 }
 
 /// The drop under pointer `y` while dragging `dragged`; `unnest` is true when
 /// the pointer is in the unnest area. `None` = not a valid drop.
-pub fn plan_drop(tree: &Tree, rows: &[RowRect], dragged: &str, y: f64, unnest: bool) -> Option<DropPlan> {
+pub fn plan_drop(
+    tree: &Tree,
+    rows: &[RowRect],
+    dragged: &str,
+    y: f64,
+    unnest: bool,
+) -> Option<DropPlan> {
     if unnest {
-        return drop_result(dragged, None, None, true, &tree.parents)
-            .map(|outcome| DropPlan { outcome, indicator: Indicator::Unnest });
+        return drop_result(dragged, None, None, true, &tree.parents).map(|outcome| DropPlan {
+            outcome,
+            indicator: Indicator::Unnest,
+        });
     }
     let lv = levels(tree, rows, dragged);
     let lists: Vec<&[DropZone]> = lv.iter().map(|l| l.zones.as_slice()).collect();
     if let Some(zone) = deepest_zone_at(&lists, y) {
         let level = lv.iter().find(|l| l.parent == zone.parent_id)?;
-        let line = level.groups.get(zone.at).map_or_else(|| level.groups.last().map_or(0.0, |g| g.bottom), |g| g.card_top);
-        let outcome = DropOutcome::Place { parent_id: zone.parent_id.clone(), index: real_index(tree, level, dragged, zone.at) };
-        return Some(DropPlan { outcome, indicator: Indicator::Line(line) });
+        let line = level.groups.get(zone.at).map_or_else(
+            || level.groups.last().map_or(0.0, |g| g.bottom),
+            |g| g.card_top,
+        );
+        let outcome = DropOutcome::Place {
+            parent_id: zone.parent_id.clone(),
+            index: real_index(tree, level, dragged, zone.at),
+        };
+        return Some(DropPlan {
+            outcome,
+            indicator: Indicator::Line(line),
+        });
     }
-    let card = rows.iter().find(|r| (r.top..=r.bottom).contains(&y)).map(|r| r.id.as_str())?;
+    let card = rows
+        .iter()
+        .find(|r| (r.top..=r.bottom).contains(&y))
+        .map(|r| r.id.as_str())?;
     let outcome = drop_result(dragged, None, Some(card), false, &tree.parents)?;
-    Some(DropPlan { outcome, indicator: Indicator::Card(card.to_owned()) })
+    Some(DropPlan {
+        outcome,
+        indicator: Indicator::Card(card.to_owned()),
+    })
 }
 
 #[cfg(test)]
@@ -147,21 +191,37 @@ mod tests {
         let mut children: HashMap<Option<String>, Vec<String>> = HashMap::new();
         for &(id, p) in pairs {
             parents.insert(id.into(), p.map(str::to_owned));
-            children.entry(p.map(str::to_owned)).or_default().push(id.into());
+            children
+                .entry(p.map(str::to_owned))
+                .or_default()
+                .push(id.into());
         }
         Tree { parents, children }
     }
 
     /// Rows 100 tall, 10 apart: row k spans [k*110, k*110+100].
     fn rows(ids: &[&str]) -> Vec<RowRect> {
-        ids.iter().enumerate().map(|(k, id)| RowRect { id: (*id).into(), top: k as f64 * 110.0, bottom: k as f64 * 110.0 + 100.0 }).collect()
+        ids.iter()
+            .enumerate()
+            .map(|(k, id)| RowRect {
+                id: (*id).into(),
+                top: k as f64 * 110.0,
+                bottom: k as f64 * 110.0 + 100.0,
+            })
+            .collect()
     }
 
     #[test]
     fn gap_between_cards_places_at_that_index() {
         let t = tree(&[("a", None), ("b", None), ("c", None)]);
         let p = plan_drop(&t, &rows(&["a", "b", "c"]), "c", 105.0, false).unwrap();
-        assert_eq!(p.outcome, DropOutcome::Place { parent_id: None, index: 1 });
+        assert_eq!(
+            p.outcome,
+            DropOutcome::Place {
+                parent_id: None,
+                index: 1
+            }
+        );
         assert_eq!(p.indicator, Indicator::Line(110.0));
     }
 
@@ -170,10 +230,22 @@ mod tests {
         let t = tree(&[("a", None), ("b", None), ("c", None)]);
         // gap after b (slot 2) while dragging a -> index 1 (excluding a)
         let p = plan_drop(&t, &rows(&["a", "b", "c"]), "a", 215.0, false).unwrap();
-        assert_eq!(p.outcome, DropOutcome::Place { parent_id: None, index: 1 });
+        assert_eq!(
+            p.outcome,
+            DropOutcome::Place {
+                parent_id: None,
+                index: 1
+            }
+        );
         // below the last card -> last position
         let p = plan_drop(&t, &rows(&["a", "b", "c"]), "a", 320.0, false).unwrap();
-        assert_eq!(p.outcome, DropOutcome::Place { parent_id: None, index: 2 });
+        assert_eq!(
+            p.outcome,
+            DropOutcome::Place {
+                parent_id: None,
+                index: 2
+            }
+        );
     }
 
     #[test]
@@ -181,7 +253,12 @@ mod tests {
         let t = tree(&[("a", None), ("b", None), ("s", Some("a"))]);
         let r = rows(&["a", "s", "b"]);
         let p = plan_drop(&t, &r, "b", 150.0, false).unwrap(); // body of s
-        assert_eq!(p.outcome, DropOutcome::Nest { parent_id: "s".into() });
+        assert_eq!(
+            p.outcome,
+            DropOutcome::Nest {
+                parent_id: "s".into()
+            }
+        );
         assert_eq!(p.indicator, Indicator::Card("s".into()));
         assert_eq!(plan_drop(&t, &r, "a", 150.0, false), None); // own subtask: cycle
         assert_eq!(plan_drop(&t, &r, "a", 50.0, false), None); // own card
@@ -193,7 +270,16 @@ mod tests {
         let r = rows(&["a", "s", "t"]);
         // gap between s and t belongs to a's list, which a may not enter
         let p = plan_drop(&t, &r, "a", 215.0, false);
-        assert!(!matches!(p, Some(DropPlan { outcome: DropOutcome::Place { parent_id: Some(_), .. }, .. })));
+        assert!(!matches!(
+            p,
+            Some(DropPlan {
+                outcome: DropOutcome::Place {
+                    parent_id: Some(_),
+                    ..
+                },
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -201,9 +287,18 @@ mod tests {
         let t = tree(&[("a", None), ("s", Some("a")), ("t", Some("a")), ("b", None)]);
         let r = rows(&["a", "s", "t", "b"]);
         let p = plan_drop(&t, &r, "b", 215.0, false).unwrap();
-        assert_eq!(p.outcome, DropOutcome::Place { parent_id: Some("a".into()), index: 1 });
+        assert_eq!(
+            p.outcome,
+            DropOutcome::Place {
+                parent_id: Some("a".into()),
+                index: 1
+            }
+        );
         let p = plan_drop(&t, &r, "s", 215.0, true).unwrap();
-        assert_eq!((p.outcome, p.indicator), (DropOutcome::Unnest, Indicator::Unnest));
+        assert_eq!(
+            (p.outcome, p.indicator),
+            (DropOutcome::Unnest, Indicator::Unnest)
+        );
         assert_eq!(plan_drop(&t, &r, "b", 215.0, true), None); // already top level
     }
 }

@@ -82,12 +82,12 @@ fn open(t: &Task) -> bool {
 }
 
 /// Tasks of a system list. `today` is the focus date for midnight expiry.
-pub fn smart_tasks<'a>(
+pub fn smart_tasks(
     list: SmartList,
-    tasks: &'a [Task],
+    tasks: &[Task],
     today: Date,
     settings: SmartSettings,
-) -> Vec<&'a Task> {
+) -> Vec<&Task> {
     match list {
         SmartList::Shortlisted => tasks
             .iter()

@@ -50,7 +50,9 @@ fn task_round_trips_with_recurrence_tags_and_steps() {
     tasks::set_tags(store.conn(), &task.id, &hydrated.tags).expect("tags");
     tasks::insert_step(store.conn(), &hydrated.steps[0]).expect("step");
 
-    let row = tasks::task(store.conn(), &task.id).expect("read").expect("present");
+    let row = tasks::task(store.conn(), &task.id)
+        .expect("read")
+        .expect("present");
     assert_eq!(row, task);
     let hydrated_read = tasks::all_tasks(store.conn()).expect("all");
     assert_eq!(hydrated_read, vec![hydrated]);
@@ -68,7 +70,10 @@ fn recurrence_is_stored_in_normalized_columns() {
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )
         .expect("row");
-    assert_eq!((kind.as_str(), interval, unit.as_str(), days.as_str()), ("custom", 2, "week", "1,3"));
+    assert_eq!(
+        (kind.as_str(), interval, unit.as_str(), days.as_str()),
+        ("custom", 2, "week", "1,3")
+    );
 }
 
 #[test]
@@ -109,7 +114,7 @@ fn deleting_a_task_cascades_steps_and_tags() {
         },
     )
     .expect("step");
-    tasks::delete_tasks(store.conn(), &[task.id.clone()]).expect("delete");
+    tasks::delete_tasks(store.conn(), std::slice::from_ref(&task.id)).expect("delete");
     let count = |sql: &str| -> i64 { store.conn().query_row(sql, [], |r| r.get(0)).unwrap() };
     assert_eq!(count("SELECT COUNT(*) FROM steps"), 0);
     assert_eq!(count("SELECT COUNT(*) FROM task_tags"), 0);
@@ -146,10 +151,21 @@ fn subtree_descendants_and_sibling_order() {
     tasks::insert_task(store.conn(), &mk("b", &root.id, 2.0)).unwrap();
     tasks::insert_task(store.conn(), &mk("a", &root.id, 1.0)).unwrap();
     tasks::insert_task(store.conn(), &mk("c", "a", 1.0)).unwrap();
-    assert_eq!(tasks::descendants(store.conn(), &root.id).unwrap(), ["a", "b", "c"]);
-    let sib: Vec<String> = tasks::siblings(store.conn(), Some(&root.id)).unwrap().into_iter().map(|s| s.0).collect();
+    assert_eq!(
+        tasks::descendants(store.conn(), &root.id).unwrap(),
+        ["a", "b", "c"]
+    );
+    let sib: Vec<String> = tasks::siblings(store.conn(), Some(&root.id))
+        .unwrap()
+        .into_iter()
+        .map(|s| s.0)
+        .collect();
     assert_eq!(sib, ["a", "b"]);
     // deleting the whole subtree in one statement honours the parent FK
-    tasks::delete_tasks(store.conn(), &["a".into(), "b".into(), "c".into(), root.id.clone()]).unwrap();
+    tasks::delete_tasks(
+        store.conn(),
+        &["a".into(), "b".into(), "c".into(), root.id.clone()],
+    )
+    .unwrap();
     assert!(tasks::all_tasks(store.conn()).unwrap().is_empty());
 }

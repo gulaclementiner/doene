@@ -38,6 +38,6 @@ pub use search::{score, search_tasks};
 pub use smartlists::{SMART, SmartList, SmartSettings, smart_tasks, visible_order};
 pub use tree::ParentMap;
 pub use view_rules::{
-    MAX_SORTS, RawSortLevel, RawView, SORT_KEYS, SortDirection, SortKey, SortLevel, ViewRules, normalise_view,
-    sort_tasks, view_matches,
+    MAX_SORTS, RawSortLevel, RawView, SORT_KEYS, SavedView, SortDirection, SortKey, SortLevel,
+    ViewRules, normalise_view, sort_tasks, view_matches,
 };

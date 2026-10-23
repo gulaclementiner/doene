@@ -1,10 +1,12 @@
 //! Plain view-model logic: no egui types, fully unit-testable.
 
+use doene_core::i18n::tr;
 use doene_core::labels::due_label;
-use doene_core::{DEFAULT_SORT, Date, HydratedTask, Importance, SmartList, SmartSettings, TaskStatus};
+use doene_core::{
+    DEFAULT_SORT, Date, HydratedTask, Importance, SmartList, SmartSettings, TaskStatus,
+};
 use doene_core::{smart_tasks, smartlists::sort_tasks};
 use doene_service::{Service, ServiceError, TaskPatch, TrashItem, UndoKind};
-use doene_core::i18n::tr;
 use std::collections::HashMap;
 
 /// The user's theme choice (persisted as the `theme` setting).
@@ -87,7 +89,9 @@ pub fn task_row(h: &HydratedTask, today: Date, today_s: &str, locale: &str) -> T
         subject: t.subject.clone(),
         completed: t.status == TaskStatus::Completed,
         important: t.importance == Importance::High,
-        due: t.due_date.map(|d| due_label(&d.to_string(), today_s, Some(locale))),
+        due: t
+            .due_date
+            .map(|d| due_label(&d.to_string(), today_s, Some(locale))),
         overdue: t.due_date.is_some_and(|d| d < today) && t.status != TaskStatus::Completed,
         tags: h.tags.iter().map(|g| format!("#{}", g.as_str())).collect(),
     }
@@ -110,8 +114,18 @@ pub fn toggle_complete(
     completed: bool,
     locale: &str,
 ) -> Result<Toggled, ServiceError> {
-    let status = if completed { TaskStatus::Open } else { TaskStatus::Completed };
-    let out = service.update_task(id, TaskPatch { status: Some(status), ..Default::default() })?;
+    let status = if completed {
+        TaskStatus::Open
+    } else {
+        TaskStatus::Completed
+    };
+    let out = service.update_task(
+        id,
+        TaskPatch {
+            status: Some(status),
+            ..Default::default()
+        },
+    )?;
     if completed {
         return Ok(Toggled::Reopened);
     }
@@ -142,7 +156,11 @@ pub fn trash_rows(items: &[TrashItem], locale: &str) -> Vec<TrashRow> {
             id: i.id.clone(),
             label: i.label.clone().unwrap_or_default(),
             kind: tr(
-                if i.kind == doene_core::TrashKind::View { "trash.kindView" } else { "trash.kindTask" },
+                if i.kind == doene_core::TrashKind::View {
+                    "trash.kindView"
+                } else {
+                    "trash.kindTask"
+                },
                 &HashMap::new(),
                 Some(locale),
             ),
@@ -181,7 +199,11 @@ pub struct Toasts {
 
 impl Toasts {
     pub fn push(&mut self, text: impl Into<String>, undo: bool, now: f64) {
-        self.items.push(Toast { text: text.into(), undo, expires: now + TOAST_SECS });
+        self.items.push(Toast {
+            text: text.into(),
+            undo,
+            expires: now + TOAST_SECS,
+        });
     }
 
     /// Drop expired toasts and return the live ones (oldest first).
@@ -199,7 +221,11 @@ impl Toasts {
 }
 
 /// Delete a task (to Trash) through the service; returns the toast text.
-pub fn delete_with_toast(service: &Service, id: &str, locale: &str) -> Result<String, ServiceError> {
+pub fn delete_with_toast(
+    service: &Service,
+    id: &str,
+    locale: &str,
+) -> Result<String, ServiceError> {
     service.delete_task(id)?;
     Ok(tr("trash.deleted", &HashMap::new(), Some(locale)))
 }
@@ -213,11 +239,22 @@ mod tests {
     #[test]
     fn delete_toast_trash_rows_and_undo() {
         let s = mem();
-        let t = s.create_task(doene_service::NewTask { subject: "x".into(), ..Default::default() }).unwrap();
-        assert_eq!(delete_with_toast(&s, &t.task.id, "en").unwrap(), "Task moved to Trash");
+        let t = s
+            .create_task(doene_service::NewTask {
+                subject: "x".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(
+            delete_with_toast(&s, &t.task.id, "en").unwrap(),
+            "Task moved to Trash"
+        );
         let rows = trash_rows(&s.trash().unwrap(), "sv");
         assert_eq!(rows.len(), 1);
-        assert_eq!((rows[0].label.as_str(), rows[0].kind.as_str()), ("x", "Uppgift"));
+        assert_eq!(
+            (rows[0].label.as_str(), rows[0].kind.as_str()),
+            ("x", "Uppgift")
+        );
         let r = s.undo().unwrap();
         assert_eq!(undo_message(r, "en"), "Task restored");
         assert_eq!(undo_message(s.undo().unwrap(), "en"), "Undone"); // the create
@@ -311,9 +348,7 @@ mod tests {
     #[test]
     fn toggling_recurring_task_spawns_then_reopen_restores() {
         let (s, _d) = svc();
-        let t = s
-            .quick_add("water plants", None, false)
-            .unwrap();
+        let t = s.quick_add("water plants", None, false).unwrap();
         s.update_task(
             &t.task.id,
             TaskPatch {
@@ -322,22 +357,35 @@ mod tests {
                     kind: Some("daily".into()),
                     interval: None,
                     unit: None,
-                    days: None
+                    days: None,
                 })),
                 ..Default::default()
             },
         )
         .unwrap();
         let r = toggle_complete(&s, &t.task.id, false, "en").unwrap();
-        assert_eq!(r, Toggled::Completed { next_due: Some("Tomorrow".into()) });
+        assert_eq!(
+            r,
+            Toggled::Completed {
+                next_due: Some("Tomorrow".into())
+            }
+        );
         let all = s.all_tasks().unwrap();
         assert_eq!(all.len(), 2);
         let spawn = all.iter().find(|h| h.task.id != t.task.id).unwrap();
         assert_eq!(spawn.task.spawned_from.as_deref(), Some(t.task.id.as_str()));
-        let acts: Vec<_> = s.activity(&t.task.id).unwrap().into_iter().map(|a| a.action).collect();
+        let acts: Vec<_> = s
+            .activity(&t.task.id)
+            .unwrap()
+            .into_iter()
+            .map(|a| a.action)
+            .collect();
         assert!(acts.contains(&"completed".to_owned()));
 
-        assert_eq!(toggle_complete(&s, &t.task.id, true, "en").unwrap(), Toggled::Reopened);
+        assert_eq!(
+            toggle_complete(&s, &t.task.id, true, "en").unwrap(),
+            Toggled::Reopened
+        );
         let all = s.all_tasks().unwrap();
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].task.status, TaskStatus::Open);

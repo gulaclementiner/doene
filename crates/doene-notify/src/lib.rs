@@ -59,7 +59,11 @@ fn format_minute(secs: i64) -> String {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = yoe + era * 400 + i64::from(m <= 2);
-    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}", rem / 3600, rem % 3600 / 60)
+    format!(
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}",
+        rem / 3600,
+        rem % 3600 / 60
+    )
 }
 
 #[cfg(windows)]
@@ -89,7 +93,10 @@ mod windows {
         let mut t = SystemTime::default();
         // SAFETY: `t` is a valid, correctly laid-out SYSTEMTIME out-pointer.
         unsafe { GetLocalTime(&mut t) };
-        format!("{:04}-{:02}-{:02}T{:02}:{:02}", t.year, t.month, t.day, t.hour, t.minute)
+        format!(
+            "{:04}-{:02}-{:02}T{:02}:{:02}",
+            t.year, t.month, t.day, t.hour, t.minute
+        )
     }
 
     /// Native toast through the WinRT toast API, driven by a hidden PowerShell
@@ -97,7 +104,11 @@ mod windows {
     pub struct WindowsNotifier;
 
     fn xml_escape(s: &str) -> String {
-        s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;")
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+            .replace('\'', "&apos;")
     }
 
     impl Notifier for WindowsNotifier {

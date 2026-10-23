@@ -38,7 +38,10 @@ fn invalid(what: impl Into<String>) -> ServiceError {
 }
 
 fn req_str(v: &Value, k: &str, what: &str) -> Res<String> {
-    v.get(k).and_then(Value::as_str).map(str::to_owned).ok_or_else(|| invalid(format!("{what}.{k}")))
+    v.get(k)
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| invalid(format!("{what}.{k}")))
 }
 
 fn array<'a>(root: &'a Value, k: &str) -> Res<&'a [Value]> {
@@ -74,7 +77,10 @@ impl Service {
             .into_iter()
             .filter_map(|(k, v)| Some((k, serde_json::from_str(&v).ok()?)))
             .collect();
-        let prefs: Map<String, Value> = aux::all_prefs(c)?.into_iter().map(|(k, v)| (k, Value::String(v))).collect();
+        let prefs: Map<String, Value> = aux::all_prefs(c)?
+            .into_iter()
+            .map(|(k, v)| (k, Value::String(v)))
+            .collect();
         let doc = json!({
             "format": EXPORT_FORMAT, "version": EXPORT_VERSION, "exported_at": ctx.now,
             "tasks": tasks,
@@ -87,7 +93,8 @@ impl Service {
     /// Replace all data with the export in `text`. Everything is validated before the
     /// database is touched, and the wipe+load is one transaction: on error nothing changes.
     pub fn import_json(&self, text: &str) -> Res<ImportSummary> {
-        let root: Value = serde_json::from_str(text).map_err(|_| coded("error.invalidJson", "invalid JSON"))?;
+        let root: Value =
+            serde_json::from_str(text).map_err(|_| coded("error.invalidJson", "invalid JSON"))?;
         if !root.is_object() || root.get("format").and_then(Value::as_str) != Some(EXPORT_FORMAT) {
             return Err(invalid("format"));
         }
@@ -96,7 +103,12 @@ impl Service {
             return Err(ServiceError::Coded(CodedError {
                 code: "error.exportVersion",
                 message: "unsupported export version".into(),
-                params: vec![("version", root.get("version").map(|v| v.to_string()).unwrap_or_default())],
+                params: vec![(
+                    "version",
+                    root.get("version")
+                        .map(|v| v.to_string())
+                        .unwrap_or_default(),
+                )],
             }));
         }
 
@@ -109,19 +121,28 @@ impl Service {
                     return Err(invalid(format!("tasks[{i}].{k}")));
                 }
             }
-            h.task.spawned_from = t.get("spawned_from").and_then(Value::as_str).map(str::to_owned);
+            h.task.spawned_from = t
+                .get("spawned_from")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
             if !ids.insert(h.task.id.clone()) {
                 return Err(invalid(format!("tasks[{i}].id duplicate")));
             }
             tasks_in.push(h);
         }
-        let step_ids: HashSet<&str> = tasks_in.iter().flat_map(|h| h.steps.iter().map(|s| s.id.as_str())).collect();
+        let step_ids: HashSet<&str> = tasks_in
+            .iter()
+            .flat_map(|h| h.steps.iter().map(|s| s.id.as_str()))
+            .collect();
         if step_ids.len() != tasks_in.iter().map(|h| h.steps.len()).sum::<usize>() {
             return Err(invalid("steps.id duplicate"));
         }
         let mut parents = HashMap::new();
         for (i, h) in tasks_in.iter().enumerate() {
-            for (k, r) in [("parent_id", &h.task.parent_id), ("spawned_from", &h.task.spawned_from)] {
+            for (k, r) in [
+                ("parent_id", &h.task.parent_id),
+                ("spawned_from", &h.task.spawned_from),
+            ] {
                 if r.as_ref().is_some_and(|r| !ids.contains(r)) {
                     return Err(invalid(format!("tasks[{i}].{k}")));
                 }
@@ -129,7 +150,11 @@ impl Service {
             parents.insert(h.task.id.clone(), h.task.parent_id.clone());
         }
         for (i, h) in tasks_in.iter().enumerate() {
-            if h.task.parent_id.as_deref().is_some_and(|p| tree::descends_from(p, &parents, &h.task.id) || p == h.task.id) {
+            if h.task
+                .parent_id
+                .as_deref()
+                .is_some_and(|p| tree::descends_from(p, &parents, &h.task.id) || p == h.task.id)
+            {
                 return Err(invalid(format!("tasks[{i}].parent_id cycle")));
             }
         }
@@ -213,7 +238,10 @@ impl Service {
         };
         self.tx(|c, _| {
             c.pragma_update(None, "defer_foreign_keys", true)?;
-            let existing: Vec<String> = tasks::all_tasks(c)?.into_iter().map(|h| h.task.id).collect();
+            let existing: Vec<String> = tasks::all_tasks(c)?
+                .into_iter()
+                .map(|h| h.task.id)
+                .collect();
             tasks::delete_tasks(c, &existing)?;
             for v in views::all(c)? {
                 views::delete(c, &v.view.id)?;
@@ -235,7 +263,14 @@ impl Service {
                 aux::insert_trash(c, t)?;
             }
             for (id, a) in &activity_in {
-                aux::insert_activity(c, id, a.task_id.as_deref(), &a.at, &a.action, a.detail.as_deref())?;
+                aux::insert_activity(
+                    c,
+                    id,
+                    a.task_id.as_deref(),
+                    &a.at,
+                    &a.action,
+                    a.detail.as_deref(),
+                )?;
             }
             for (k, v) in &settings_in {
                 aux::set_setting(c, k, v)?;
