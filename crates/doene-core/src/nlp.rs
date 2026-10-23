@@ -485,13 +485,12 @@ pub fn parse_quick_add(text: &str, today: Date, opts: &ParseOptions) -> ParsedQu
                 rec_first = Some(RecFirst::Nth(n));
                 true
             }))
+        && sv
     {
-        if sv {
-            take(&re.sv_every_unit, &mut s, |m| {
-                out.recurrence = Some(fixed_kind(unit_kind(sv_unit(&m[1]))));
-                true
-            });
-        }
+        take(&re.sv_every_unit, &mut s, |m| {
+            out.recurrence = Some(fixed_kind(unit_kind(sv_unit(&m[1]))));
+            true
+        });
     }
 
     // 5. Due date: day words, `in N unit`, `next week/month`, weekday names,
@@ -586,21 +585,20 @@ pub fn parse_quick_add(text: &str, today: Date, opts: &ParseOptions) -> ParsedQu
             }
             Err(_) => false,
         })
+        && sv
     {
-        if sv {
-            take(&re.sv_dmy, &mut s, |m| {
-                let day: u8 = m[1].parse().unwrap_or(0);
-                let month: u8 = m[2].parse().unwrap_or(0);
-                let date = match m.get(3) {
-                    Some(y) => ymd(y.as_str().parse().expect("4 digits"), month, day),
-                    None => next_dmy(today, month, day),
-                };
-                // 31/2 and 15/13 are not dates: the token stays in the subject.
-                let Some(date) = date else { return false };
-                set_due(&mut out, date);
-                true
-            });
-        }
+        take(&re.sv_dmy, &mut s, |m| {
+            let day: u8 = m[1].parse().unwrap_or(0);
+            let month: u8 = m[2].parse().unwrap_or(0);
+            let date = match m.get(3) {
+                Some(y) => ymd(y.as_str().parse().expect("4 digits"), month, day),
+                None => next_dmy(today, month, day),
+            };
+            // 31/2 and 15/13 are not dates: the token stays in the subject.
+            let Some(date) = date else { return false };
+            set_due(&mut out, date);
+            true
+        });
     }
 
     // 6. A recurrence without an explicit date is due at its first occurrence,

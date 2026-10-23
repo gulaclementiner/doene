@@ -488,7 +488,7 @@ impl DöneApp {
         ctx.request_repaint_after(std::time::Duration::from_millis(500));
         let mut undo = false;
         let mut dismiss = None;
-        egui::Area::new(egui::Id::new("toasts"))
+        egui::Area::new(egui::Id::unique("toasts"))
             .anchor(egui::Align2::RIGHT_BOTTOM, [-12.0, -12.0])
             .show(ctx, |ui| {
                 for (i, t) in live.iter().enumerate() {
