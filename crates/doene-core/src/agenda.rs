@@ -2,8 +2,12 @@
 //! behind the My Day view. The group order is a parameter — the spec default
 //! and the cleaned user-saved order both live in `agenda_order`.
 
+use std::collections::HashSet;
+use std::fmt;
+
+use crate::agenda_order::{SECTION_BREAK, default_order};
 use crate::dates::Date;
-use crate::entities::{Importance, Task};
+use crate::entities::{Importance, Task, TaskStatus};
 
 /// Focus mode (Gör't #98): daily — a task is picked while its focus date is
 /// today; durable — it stays picked as long as it has any focus date.
@@ -108,6 +112,153 @@ pub const DEFAULT_SORT: SortSpec = SortSpec {
     order: SortOrder::Due,
     direction: SortDirection::Asc,
 };
+
+/// The two agenda sections split by the section break (Gör't's
+/// `"do-first"` / `"continue-with"`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SectionId {
+    DoFirst,
+    ContinueWith,
+}
+
+impl SectionId {
+    /// Gör't's section id: `"do-first"` / `"continue-with"`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::DoFirst => "do-first",
+            Self::ContinueWith => "continue-with",
+        }
+    }
+}
+
+/// One non-empty group inside a section.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Group<'a> {
+    pub key: GroupKey,
+    /// The group's tasks in within-group order.
+    pub tasks: Vec<&'a Task>,
+}
+
+/// A section of the agenda ("Do first" / "Continue with").
+#[derive(Debug, Clone, PartialEq)]
+pub struct Section<'a> {
+    pub id: SectionId,
+    /// Non-empty groups in order; empty groups are omitted.
+    pub groups: Vec<Group<'a>>,
+}
+
+/// The My Day agenda (Gör't's `agenda` result).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Agenda<'a> {
+    /// Sections in order; an empty section keeps its slot.
+    pub sections: Vec<Section<'a>>,
+    /// Tasks completed today, ascending by completion time (first at the top).
+    pub completed: Vec<&'a Task>,
+}
+
+/// Options for [`agenda`] (Gör't's `{ today, order, sort, focusMode }`).
+#[derive(Debug, Clone)]
+pub struct AgendaOptions {
+    /// The agenda's "today" — midnight expiry is relative to this date.
+    pub today: Date,
+    /// Group order: group keys plus at most one section break (Gör't tokens).
+    pub order: Vec<String>,
+    /// Within-group sort; default [`DEFAULT_SORT`].
+    pub sort: SortSpec,
+    /// Focus mode for the shortlisted group; default `FocusMode::Daily`.
+    pub focus_mode: FocusMode,
+}
+
+impl AgendaOptions {
+    /// Options with the spec defaults (default order, due-asc sort, daily focus).
+    pub fn new(today: Date) -> Self {
+        Self {
+            today,
+            order: default_order(),
+            sort: DEFAULT_SORT,
+            focus_mode: FocusMode::Daily,
+        }
+    }
+}
+
+/// An unknown key in an agenda order (Gör't throws `unknown agenda group: <key>`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnknownGroup(pub String);
+
+impl fmt::Display for UnknownGroup {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "unknown agenda group: {}", self.0)
+    }
+}
+
+impl std::error::Error for UnknownGroup {}
+
+/// The My Day agenda (Gör't's `agenda`): open tasks are assigned to the first
+/// group in `order` whose filter matches — each task appears exactly once;
+/// the break splits the groups into two sections; empty groups are omitted
+/// (an empty section keeps its slot). `completed` lists today's completions
+/// ascending by completion time.
+pub fn agenda<'a>(tasks: &'a [Task], opts: &AgendaOptions) -> Result<Agenda<'a>, UnknownGroup> {
+    let mut sections: Vec<Section<'a>> = vec![];
+    // Tasks already assigned to an earlier group (first match wins).
+    let mut used: HashSet<&'a str> = HashSet::new();
+
+    for key in &opts.order {
+        if key == SECTION_BREAK {
+            let id = if sections.is_empty() { SectionId::DoFirst } else { SectionId::ContinueWith };
+            sections.push(Section { id, groups: vec![] });
+            continue;
+        }
+        let group_key = GroupKey::from_token(key).ok_or(UnknownGroup(key.clone()))?;
+        if sections.is_empty() {
+            sections.push(Section { id: SectionId::DoFirst, groups: vec![] });
+        }
+        // Open tasks only; each task goes to the first matching group.
+        let matched: Vec<&'a Task> = tasks
+            .iter()
+            .filter(|t| {
+                t.status != TaskStatus::Completed
+                    && !used.contains(t.id.as_str())
+                    && group_key.matches(t, opts.today, opts.focus_mode)
+            })
+            .collect();
+        if !matched.is_empty() {
+            for t in &matched {
+                used.insert(t.id.as_str());
+            }
+            sections.last_mut().expect("a section exists after the push above").groups.push(Group {
+                key: group_key,
+                tasks: matched,
+            });
+        }
+    }
+
+    // Completed today, ascending by completion time (first at the top).
+    let today = opts.today.to_string();
+    let mut completed: Vec<&'a Task> = tasks
+        .iter()
+        .filter(|t| {
+            t.status == TaskStatus::Completed
+                && t.completed_at
+                    .as_deref()
+                    .is_some_and(|ts| ts.starts_with(&today))
+        })
+        .collect();
+    completed.sort_by(|a, b| a.completed_at.cmp(&b.completed_at));
+
+    Ok(Agenda { sections, completed })
+}
+
+/// The open tasks the agenda shows, in agenda order (sections, then groups,
+/// then within-group order).
+pub fn agenda_open_tasks<'a>(tasks: &'a [Task], opts: &AgendaOptions) -> Result<Vec<&'a Task>, UnknownGroup> {
+    let a = agenda(tasks, opts)?;
+    Ok(a.sections
+        .iter()
+        .flat_map(|s| s.groups.iter().flat_map(|g| g.tasks.iter()))
+        .copied()
+        .collect())
+}
 
 #[cfg(test)]
 mod tests {
@@ -257,5 +408,270 @@ mod tests {
             "durable keeps old picks"
         );
         assert!(!is_picked(&undated, today, FocusMode::Durable));
+    }
+
+    /// Gör't's `group(a, section, id)` accessor.
+    fn group_ids<'t>(a: &Agenda<'t>, section: SectionId, key: GroupKey) -> Vec<&'t str> {
+        a.sections
+            .iter()
+            .find(|s| s.id == section)
+            .and_then(|s| s.groups.iter().find(|g| g.key == key))
+            .map(|g| g.tasks.iter().map(|t| t.id.as_str()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Gör't's `all_group_tasks(a)`.
+    fn all_group_tasks<'t>(a: &Agenda<'t>) -> Vec<&'t str> {
+        a.sections
+            .iter()
+            .flat_map(|s| s.groups.iter().flat_map(|g| g.tasks.iter()))
+            .map(|t| t.id.as_str())
+            .collect()
+    }
+
+    // Gör't test/agenda.test.js — "group filters: each group holds exactly its open tasks".
+    #[test]
+    fn group_filters_each_group_holds_exactly_its_open_tasks() {
+        let today = d(TODAY);
+        let tasks: Vec<Task> = vec![
+            task!("overdue", due_date => Some(d("2025-03-05"))),
+            task!(
+                "overdue-done",
+                due_date => Some(d("2025-03-05")),
+                status => TaskStatus::Completed
+            ),
+            task!("starred", importance => Importance::High, due_date => Some(today)),
+            task!(
+                "starred-done",
+                importance => Importance::High,
+                due_date => Some(today),
+                status => TaskStatus::Completed
+            ),
+            task!("starred-later", importance => Importance::High, due_date => Some(d("2025-03-13"))),
+            task!("pick", focus_date => Some(today)),
+            task!("pick-yesterday", focus_date => Some(d("2025-03-11"))),
+            task!("due", due_date => Some(today)),
+            task!("due-later", due_date => Some(d("2025-03-13"))),
+            task!("plain"),
+        ];
+        let a = agenda(&tasks, &AgendaOptions::new(today)).unwrap();
+        assert_eq!(group_ids(&a, SectionId::DoFirst, GroupKey::Overdue), ["overdue"]);
+        assert_eq!(group_ids(&a, SectionId::DoFirst, GroupKey::StarredDue), ["starred"]);
+        assert_eq!(group_ids(&a, SectionId::ContinueWith, GroupKey::Shortlisted), ["pick"]);
+        // `starred` was already taken by starred-due (first match wins).
+        assert_eq!(group_ids(&a, SectionId::ContinueWith, GroupKey::DueToday), ["due"]);
+        let mut all = all_group_tasks(&a);
+        all.sort();
+        assert_eq!(all, ["due", "overdue", "pick", "starred"], "the union of groups is exactly the open tasks");
+    }
+
+    // Gör't — "first-match dedup: a task appears in exactly one group".
+    #[test]
+    fn first_match_dedup_a_task_appears_in_exactly_one_group() {
+        let today = d(TODAY);
+        let tasks: Vec<Task> = vec![
+            task!("pick-due", focus_date => Some(today), due_date => Some(today)),
+            task!("starred", importance => Importance::High, due_date => Some(today)),
+            task!("overdue-starred", importance => Importance::High, due_date => Some(d("2025-03-01"))),
+            task!("plain"),
+        ];
+        let opts = AgendaOptions::new(today);
+        let a = agenda(&tasks, &opts).unwrap();
+        assert_eq!(group_ids(&a, SectionId::DoFirst, GroupKey::Overdue), ["overdue-starred"]);
+        assert_eq!(group_ids(&a, SectionId::DoFirst, GroupKey::StarredDue), ["starred"]);
+        assert_eq!(group_ids(&a, SectionId::ContinueWith, GroupKey::Shortlisted), ["pick-due"]);
+        // due-today is empty: both of its candidates were taken earlier.
+        assert_eq!(
+            group_ids(&a, SectionId::ContinueWith, GroupKey::DueToday),
+            Vec::<&str>::new()
+        );
+        let all = all_group_tasks(&a);
+        let unique: std::collections::HashSet<&str> = all.iter().copied().collect();
+        assert_eq!(all.len(), unique.len(), "no task in two groups");
+        // The open tasks the agenda shows, in agenda order.
+        let shown = agenda_open_tasks(&tasks, &opts).unwrap();
+        assert_eq!(
+            shown.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+            ["overdue-starred", "starred", "pick-due"]
+        );
+    }
+
+    // Gör't — "empty groups are omitted; empty sections keep their slot".
+    #[test]
+    fn empty_groups_are_omitted_empty_sections_keep_their_slot() {
+        let today = d(TODAY);
+        let tasks: Vec<Task> = vec![task!("pick", focus_date => Some(today))];
+        let a = agenda(&tasks, &AgendaOptions::new(today)).unwrap();
+        assert_eq!(
+            a.sections.iter().map(|s| s.id).collect::<Vec<_>>(),
+            [SectionId::DoFirst, SectionId::ContinueWith]
+        );
+        assert!(a.sections[0].groups.is_empty());
+        let cw = &a.sections[1];
+        assert_eq!(cw.groups.len(), 1);
+        assert_eq!(cw.groups[0].key, GroupKey::Shortlisted);
+        // An empty task list yields two empty sections.
+        let a = agenda(&[], &AgendaOptions::new(today)).unwrap();
+        assert_eq!(
+            a.sections.iter().map(|s| s.id).collect::<Vec<_>>(),
+            [SectionId::DoFirst, SectionId::ContinueWith]
+        );
+        assert!(a.sections[0].groups.is_empty() && a.sections[1].groups.is_empty());
+        assert!(a.completed.is_empty());
+    }
+
+    // Gör't — "completed today only, ascending by completion time".
+    #[test]
+    fn completed_today_only_ascending_by_completion_time() {
+        let today = d(TODAY);
+        let tasks: Vec<Task> = vec![
+            task!("open", status => TaskStatus::Open),
+            task!(
+                "late",
+                status => TaskStatus::Completed,
+                completed_at => Some(format!("{TODAY}T12:00:00.000Z"))
+            ),
+            task!(
+                "yesterday",
+                status => TaskStatus::Completed,
+                completed_at => Some("2025-03-11T09:00:00.000Z".to_owned())
+            ),
+            task!(
+                "early",
+                status => TaskStatus::Completed,
+                completed_at => Some(format!("{TODAY}T08:00:00.000Z"))
+            ),
+            task!(
+                "mid",
+                status => TaskStatus::Completed,
+                completed_at => Some(format!("{TODAY}T10:00:00.000Z"))
+            ),
+        ];
+        let a = agenda(&tasks, &AgendaOptions::new(today)).unwrap();
+        assert_eq!(
+            a.completed.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+            ["early", "mid", "late"]
+        );
+        // The open task matches no group.
+        assert!(all_group_tasks(&a).is_empty());
+    }
+
+    // Gör't — "order is a parameter: custom orders and break positions are honored".
+    #[test]
+    fn order_is_a_parameter_custom_orders_and_break_positions_are_honored() {
+        let today = d(TODAY);
+        let tasks: Vec<Task> = vec![
+            task!("pick-due", focus_date => Some(today), due_date => Some(today)),
+            task!("starred", importance => Importance::High, due_date => Some(today)),
+            task!("overdue", due_date => Some(d("2025-03-01"))),
+        ];
+        let opts = AgendaOptions {
+            order: vec![
+                "due-today".into(),
+                SECTION_BREAK.into(),
+                "shortlisted".into(),
+                "overdue".into(),
+                "starred-due".into(),
+            ],
+            ..AgendaOptions::new(today)
+        };
+        let a = agenda(&tasks, &opts).unwrap();
+        assert_eq!(
+            a.sections
+                .iter()
+                .map(|s| s.groups.iter().map(|g| g.key.as_token()).collect::<Vec<_>>())
+                .collect::<Vec<_>>(),
+            vec![vec!["due-today"], vec!["overdue"]]
+        );
+        assert_eq!(group_ids(&a, SectionId::DoFirst, GroupKey::DueToday), ["pick-due", "starred"]);
+        // shortlisted is empty (its only candidate was taken) and omitted.
+        assert_eq!(
+            group_ids(&a, SectionId::ContinueWith, GroupKey::Shortlisted),
+            Vec::<&str>::new()
+        );
+        // An order without a break yields one section.
+        let opts = AgendaOptions {
+            order: vec!["overdue".into(), "shortlisted".into()],
+            ..AgendaOptions::new(today)
+        };
+        let a = agenda(&tasks, &opts).unwrap();
+        assert_eq!(a.sections.len(), 1);
+        assert_eq!(a.sections[0].id, SectionId::DoFirst);
+    }
+
+    // Gör't — "focus mode: daily picks expire at midnight; durable keeps them".
+    #[test]
+    fn focus_mode_daily_picks_expire_at_midnight_durable_keeps_them() {
+        let today = d(TODAY);
+        let tasks: Vec<Task> = vec![
+            task!("today-pick", focus_date => Some(today)),
+            task!("old-pick", focus_date => Some(d("2025-03-10"))),
+        ];
+        // Daily is the default.
+        let a = agenda(&tasks, &AgendaOptions::new(today)).unwrap();
+        assert_eq!(group_ids(&a, SectionId::ContinueWith, GroupKey::Shortlisted), ["today-pick"]);
+        // Explicit daily agrees; durable keeps old picks.
+        let opts = AgendaOptions { focus_mode: FocusMode::Daily, ..AgendaOptions::new(today) };
+        assert_eq!(
+            group_ids(&agenda(&tasks, &opts).unwrap(), SectionId::ContinueWith, GroupKey::Shortlisted),
+            ["today-pick"]
+        );
+        let opts = AgendaOptions { focus_mode: FocusMode::Durable, ..AgendaOptions::new(today) };
+        assert_eq!(
+            group_ids(&agenda(&tasks, &opts).unwrap(), SectionId::ContinueWith, GroupKey::Shortlisted),
+            ["today-pick", "old-pick"]
+        );
+    }
+
+    // Gör't — "radar group: important undated tasks, below due today (#98)".
+    #[test]
+    fn radar_group_important_undated_tasks_below_due_today() {
+        let today = d(TODAY);
+        let tasks: Vec<Task> = vec![
+            task!("on-radar", importance => Importance::High),
+            task!("starred-dated", importance => Importance::High, due_date => Some(today)),
+            task!("normal-undated"),
+        ];
+        let a = agenda(&tasks, &AgendaOptions::new(today)).unwrap();
+        assert_eq!(group_ids(&a, SectionId::ContinueWith, GroupKey::DueToday), Vec::<&str>::new());
+        assert_eq!(group_ids(&a, SectionId::ContinueWith, GroupKey::Radar), ["on-radar"]);
+        assert_eq!(group_ids(&a, SectionId::DoFirst, GroupKey::StarredDue), ["starred-dated"]);
+    }
+
+    // Gör't — "radar dedup: a high+undated pick goes to shortlisted first;
+    // reordering lets radar win".
+    #[test]
+    fn radar_dedup_shortlisted_wins_by_default_reorder_lets_radar_win() {
+        let today = d(TODAY);
+        let tasks: Vec<Task> =
+            vec![task!("pick-radar", importance => Importance::High, focus_date => Some(today))];
+        // Default order: shortlisted (before radar) wins.
+        let a = agenda(&tasks, &AgendaOptions::new(today)).unwrap();
+        assert_eq!(group_ids(&a, SectionId::ContinueWith, GroupKey::Shortlisted), ["pick-radar"]);
+        assert_eq!(group_ids(&a, SectionId::ContinueWith, GroupKey::Radar), Vec::<&str>::new());
+        // Reordered: radar first.
+        let opts = AgendaOptions {
+            order: vec![SECTION_BREAK.into(), "radar".into(), "shortlisted".into()],
+            ..AgendaOptions::new(today)
+        };
+        let a = agenda(&tasks, &opts).unwrap();
+        assert_eq!(group_ids(&a, SectionId::DoFirst, GroupKey::Radar), ["pick-radar"]);
+        assert_eq!(group_ids(&a, SectionId::DoFirst, GroupKey::Shortlisted), Vec::<&str>::new());
+    }
+
+    // Gör't — "unknown group keys are refused; input is not mutated".
+    #[test]
+    fn unknown_group_keys_are_refused_input_is_not_mutated() {
+        let today = d(TODAY);
+        let tasks: Vec<Task> = vec![task!("a"), task!("b")];
+        let opts = AgendaOptions {
+            order: vec!["bogus".into(), SECTION_BREAK.into()],
+            ..AgendaOptions::new(today)
+        };
+        let err = agenda(&tasks, &opts).unwrap_err();
+        assert_eq!(err.to_string(), "unknown agenda group: bogus");
+        // Input is not mutated.
+        assert_eq!(tasks.len(), 2);
+        assert_eq!(tasks[0].id, "a");
     }
 }
